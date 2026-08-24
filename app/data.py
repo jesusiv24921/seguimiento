@@ -37,7 +37,8 @@ if _env_excel_path and not EXCEL_PATH.exists() and _BUNDLED_EXCEL_PATH.exists():
     shutil.copy(_BUNDLED_EXCEL_PATH, EXCEL_PATH)
 
 HALLAZGOS_SHEET = "HALLAZGOS"
-HALLAZGOS_COLUMNS = ["Proyecto", "Motor", "Script", "Función", "Descripción", "Estado"]
+HALLAZGOS_COLUMNS = ["Proyecto", "Motor", "Script", "Función", "Descripción", "Estado",
+                     "Fecha hallazgo", "Fecha cierre"]
 HALLAZGOS_ESTADOS = ["Abierto", "En revisión", "Cerrado"]
 
 ACTIVIDADES_SHEET = "ACTIVIDADES"
@@ -378,6 +379,9 @@ def close_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descrip
                         "Actualiza los datos e inténtalo de nuevo.")
 
     estado_cell.value = "Cerrado"
+    fecha_cierre_cell = ws.cell(row=fila, column=col_idx["Fecha cierre"])
+    fecha_cierre_cell.value = dt.date.today()
+    fecha_cierre_cell.number_format = "DD/MM/YYYY"
     try:
         wb.save(path)
     except PermissionError:
@@ -387,12 +391,16 @@ def close_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descrip
 
 
 def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str,
-                  estado: str, path: Path | str | None = None) -> tuple[bool, str]:
+                  estado: str, fecha_hallazgo: dt.date | None = None,
+                  path: Path | str | None = None) -> tuple[bool, str]:
     """Agrega una fila nueva al final de HALLAZGOS. Rechaza el alta si ya
     existe un hallazgo idéntico (misma combinación Proyecto+Motor+Script+
     Función+Descripción), porque close_hallazgo() identifica los registros
-    por esa combinación y dos filas iguales lo volverían ambiguo."""
+    por esa combinación y dos filas iguales lo volverían ambiguo.
+    fecha_hallazgo, si no se da, se registra como hoy. Fecha cierre queda
+    vacía: solo se llena cuando el hallazgo se cierra de verdad."""
     path = path if path is not None else EXCEL_PATH
+    fecha_hallazgo = fecha_hallazgo or dt.date.today()
 
     def _norm(v) -> str:
         return "" if v is None else str(v).strip()
@@ -424,9 +432,12 @@ def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripci
 
     fila = ws.max_row + 1
     valores = {"Proyecto": proyecto, "Motor": motor, "Script": script, "Función": funcion,
-               "Descripción": descripcion, "Estado": estado}
+               "Descripción": descripcion, "Estado": estado, "Fecha hallazgo": fecha_hallazgo}
     for nombre, valor in valores.items():
-        ws.cell(row=fila, column=col_idx[nombre]).value = valor
+        celda = ws.cell(row=fila, column=col_idx[nombre])
+        celda.value = valor
+        if nombre == "Fecha hallazgo":
+            celda.number_format = "DD/MM/YYYY"
 
     try:
         wb.save(path)
@@ -439,6 +450,7 @@ def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripci
 def edit_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str, estado_actual: str,
                    nuevo_proyecto: str, nuevo_motor: str, nuevo_script: str, nuevo_funcion: str,
                    nueva_descripcion: str, nuevo_estado: str,
+                   nueva_fecha_hallazgo: dt.date | None = None, nueva_fecha_cierre: dt.date | None = None,
                    path: Path | str | None = None) -> tuple[bool, str]:
     """Modifica un hallazgo existente (cualquier columna). El registro original
     se identifica por la combinación completa Proyecto+Motor+Script+Función+
@@ -498,9 +510,13 @@ def edit_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripc
         return False, ("Este hallazgo cambió desde que se cargó la página. Actualiza los datos e inténtalo de nuevo.")
 
     valores = {"Proyecto": nuevo_proyecto, "Motor": nuevo_motor, "Script": nuevo_script,
-               "Función": nuevo_funcion, "Descripción": nueva_descripcion, "Estado": nuevo_estado}
+               "Función": nuevo_funcion, "Descripción": nueva_descripcion, "Estado": nuevo_estado,
+               "Fecha hallazgo": nueva_fecha_hallazgo, "Fecha cierre": nueva_fecha_cierre}
     for nombre, valor in valores.items():
-        ws.cell(row=fila, column=col_idx[nombre]).value = valor
+        celda = ws.cell(row=fila, column=col_idx[nombre])
+        celda.value = valor
+        if nombre in ("Fecha hallazgo", "Fecha cierre"):
+            celda.number_format = "DD/MM/YYYY"
 
     try:
         wb.save(path)

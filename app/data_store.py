@@ -73,19 +73,25 @@ def apply_all_filters(df: pd.DataFrame, start_date, end_date) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------
-# HALLAZGOS (sin fechas, así que no comparte STORE_COLUMNS con actividades)
+# HALLAZGOS (columnas propias, no comparte STORE_COLUMNS con actividades)
 # --------------------------------------------------------------------------
-HALLAZGOS_COLUMNS = ["Proyecto", "Motor", "Script", "Función", "Descripción", "Estado"]
+HALLAZGOS_COLUMNS = ["Proyecto", "Motor", "Script", "Función", "Descripción", "Estado",
+                     "Fecha hallazgo", "Fecha cierre"]
+HALLAZGOS_DATE_COLS = ["Fecha hallazgo", "Fecha cierre"]
 
 
 def hallazgos_to_store(df: pd.DataFrame) -> str:
-    return df[HALLAZGOS_COLUMNS].to_json(orient="records")
+    return df[HALLAZGOS_COLUMNS].to_json(orient="records", date_format="iso")
 
 
 def hallazgos_from_store(json_str: str | None) -> pd.DataFrame:
     if not json_str:
         return pd.DataFrame(columns=HALLAZGOS_COLUMNS)
-    return pd.read_json(io.StringIO(json_str), orient="records")
+    df = pd.read_json(io.StringIO(json_str), orient="records")
+    for col in HALLAZGOS_DATE_COLS:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+    return df
 
 
 # --------------------------------------------------------------------------

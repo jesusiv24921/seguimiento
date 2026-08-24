@@ -7,8 +7,11 @@ tabla reflejen el cambio real.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import dash
 import dash_bootstrap_components as dbc
+import pandas as pd
 from dash import Input, Output, State, dash_table, dcc, html
 
 import charts
@@ -86,6 +89,8 @@ layout = html.Div(className="page", children=[
             id="hal-tabla",
             columns=[
                 {"name": "Estado", "id": "Estado"},
+                {"name": "Fecha hallazgo", "id": "fecha_hallazgo_txt"},
+                {"name": "Fecha cierre", "id": "fecha_cierre_txt"},
                 {"name": "Motor", "id": "Motor"},
                 {"name": "Script", "id": "Script"},
                 {"name": "Función", "id": "Función"},
@@ -95,6 +100,8 @@ layout = html.Div(className="page", children=[
             page_size=12,
             sort_action="native",
             filter_action="native",
+            export_format="csv",
+            export_headers="display",
             style_as_list_view=True,
             style_table={"overflowX": "auto"},
             style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
@@ -111,7 +118,9 @@ layout = html.Div(className="page", children=[
             ),
             style_cell_conditional=[{"if": {"column_id": "Motor"}, "minWidth": "200px"},
                                      {"if": {"column_id": "Descripción"}, "minWidth": "340px"},
-                                     {"if": {"column_id": "Estado"}, "maxWidth": "110px"}],
+                                     {"if": {"column_id": "Estado"}, "maxWidth": "110px"},
+                                     {"if": {"column_id": "fecha_hallazgo_txt"}, "maxWidth": "110px"},
+                                     {"if": {"column_id": "fecha_cierre_txt"}, "maxWidth": "110px"}],
         ),
     ]),
 
@@ -148,10 +157,17 @@ layout = html.Div(className="page", children=[
                        dbc.Textarea(id="hal-form-descripcion", placeholder="Descripción del hallazgo.",
                                      style={"height": "90px"})],
                        className="mb-3"),
-            html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
-                       dcc.Dropdown(id="hal-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
-                                     value="Abierto", clearable=False)],
-                       className="mb-3"),
+            dbc.Row([
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
+                                    dcc.Dropdown(id="hal-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
+                                                  value="Abierto", clearable=False)],
+                                    className="mb-3"), md=6),
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-calendar3"), "Fecha hallazgo"],
+                                              className="filter-label"),
+                                    dcc.DatePickerSingle(id="hal-form-fecha-hallazgo", display_format="DD/MM/YYYY",
+                                                           date=dt.date.today(), className="w-100")],
+                                    className="mb-3"), md=6),
+            ]),
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancelar", id="btn-cancelar-nuevo-hallazgo", className="btn-cal-nav", n_clicks=0),
@@ -175,9 +191,21 @@ layout = html.Div(className="page", children=[
                        dbc.Input(id="hal-edit-form-funcion", type="text")], className="mb-3"),
             html.Div([html.Div([html.I(className="bi bi-text-paragraph"), "Descripción"], className="filter-label"),
                        dbc.Textarea(id="hal-edit-form-descripcion", style={"height": "90px"})], className="mb-3"),
-            html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
-                       dcc.Dropdown(id="hal-edit-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
-                                     clearable=False)], className="mb-3"),
+            dbc.Row([
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
+                                    dcc.Dropdown(id="hal-edit-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
+                                                  clearable=False)], className="mb-3"), md=4),
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-calendar3"), "Fecha hallazgo"],
+                                              className="filter-label"),
+                                    dcc.DatePickerSingle(id="hal-edit-form-fecha-hallazgo",
+                                                           display_format="DD/MM/YYYY", className="w-100")],
+                                    className="mb-3"), md=4),
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-calendar-check"), "Fecha cierre"],
+                                              className="filter-label"),
+                                    dcc.DatePickerSingle(id="hal-edit-form-fecha-cierre",
+                                                           display_format="DD/MM/YYYY", className="w-100")],
+                                    className="mb-3"), md=4),
+            ]),
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancelar", id="btn-cancelar-editar-hallazgo", className="btn-cal-nav", n_clicks=0),
@@ -268,7 +296,21 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
     fig_estado = charts.fig_donut_hallazgo_estado(filtered)
     fig_motor = charts.fig_hallazgos_por_motor(filtered)
 
-    tabla_data = filtered[["Estado", "Motor", "Script", "Función", "Descripción", "Proyecto"]].to_dict("records")
+    tabla = filtered.copy()
+    tabla["fecha_hallazgo_txt"] = tabla["Fecha hallazgo"].dt.strftime("%d/%m/%Y").fillna("—")
+    tabla["fecha_cierre_txt"] = tabla["Fecha cierre"].dt.strftime("%d/%m/%Y").fillna("—")
+    tabla["fecha_hallazgo_iso"] = tabla["Fecha hallazgo"].dt.strftime("%Y-%m-%d")
+    tabla["fecha_cierre_iso"] = tabla["Fecha cierre"].dt.strftime("%Y-%m-%d")
+    tabla_data = tabla[["Estado", "Motor", "Script", "Función", "Descripción", "Proyecto",
+                         "fecha_hallazgo_txt", "fecha_cierre_txt",
+                         "fecha_hallazgo_iso", "fecha_cierre_iso"]].to_dict("records")
+    # to_dict convierte los None de las fechas vacías en NaN (float); DatePickerSingle
+    # necesita None literal para mostrarse vacío en vez de una fecha inválida.
+    for fila in tabla_data:
+        if pd.isna(fila["fecha_hallazgo_iso"]):
+            fila["fecha_hallazgo_iso"] = None
+        if pd.isna(fila["fecha_cierre_iso"]):
+            fila["fecha_cierre_iso"] = None
 
     return (str(total), str(abiertos), abiertos_icon, str(revision), str(cerrados),
             f"{pct_cierre:.1f}%", fig_estado, fig_motor, tabla_data)
@@ -302,6 +344,7 @@ def update_hallazgo_selection(selected_rows, table_data):
         "proyecto": row.get("Proyecto", "Sentinel Alerts"),
         "motor": row["Motor"], "script": row["Script"], "funcion": row["Función"],
         "descripcion": row["Descripción"], "estado_actual": row["Estado"],
+        "fecha_hallazgo": row.get("fecha_hallazgo_iso"), "fecha_cierre": row.get("fecha_cierre_iso"),
     }
     if row["Estado"] == "Cerrado":
         return True, False, False, "Este hallazgo ya está cerrado.", seleccionado
@@ -313,6 +356,18 @@ def _campo_modal(label: str, value: str) -> html.Div:
         html.Div(label, className="modal-field-label"),
         html.Div(value, className="modal-field-value"),
     ], className="modal-field")
+
+
+_IDENTIDAD_KEYS = ["proyecto", "motor", "script", "funcion", "descripcion", "estado_actual"]
+
+
+def _identidad(seleccionado: dict) -> dict:
+    """store-hallazgo-seleccionado trae, además de la clave de identidad que
+    usan close/delete_hallazgo, las fechas actuales (para prellenar el
+    formulario de edición). Esta función se queda solo con la clave de
+    identidad, para poder seguir usando **kwargs sin pasar argumentos que
+    close_hallazgo/delete_hallazgo no esperan."""
+    return {k: seleccionado[k] for k in _IDENTIDAD_KEYS}
 
 
 # --------------------------------------------------------------------------
@@ -366,7 +421,7 @@ def confirm_close(n_clicks, seleccionado):
     if not seleccionado:
         return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
 
-    ok, msg = data_mod.close_hallazgo(**seleccionado)
+    ok, msg = data_mod.close_hallazgo(**_identidad(seleccionado))
     if ok:
         nuevo_df = data_mod.load_hallazgos()
         return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True
@@ -399,6 +454,7 @@ def update_hallazgo_form_proyecto_options(lookups_json):
     Output("hal-form-funcion", "value"),
     Output("hal-form-descripcion", "value"),
     Output("hal-form-estado", "value"),
+    Output("hal-form-fecha-hallazgo", "date"),
     Input("btn-nuevo-hallazgo", "n_clicks"),
     State("hal-clicks-baseline", "data"),
     prevent_initial_call=True,
@@ -406,8 +462,8 @@ def update_hallazgo_form_proyecto_options(lookups_json):
 def open_nuevo_hallazgo(n_clicks, baseline):
     umbral = (baseline or {}).get("btn-nuevo-hallazgo", 0)
     if not n_clicks or n_clicks <= umbral:
-        return (dash.no_update,) * 8
-    return True, None, None, "", "", "", "", "Abierto"
+        return (dash.no_update,) * 9
+    return True, None, None, "", "", "", "", "Abierto", dt.date.today()
 
 
 @dash.callback(
@@ -433,9 +489,10 @@ def cancel_nuevo_hallazgo(_n_clicks):
     State("hal-form-funcion", "value"),
     State("hal-form-descripcion", "value"),
     State("hal-form-estado", "value"),
+    State("hal-form-fecha-hallazgo", "date"),
     prevent_initial_call=True,
 )
-def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripcion, estado):
+def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripcion, estado, fecha_hallazgo):
     if not n_clicks:
         # Ver comentario equivalente en actividades.py: dash/#1513 puede invocar este
         # callback al entrar a la página con campos vacíos, y sin esta guarda su
@@ -462,6 +519,7 @@ def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripci
     ok, msg = data_mod.add_hallazgo(
         proyecto=proyecto, motor=motor.strip(), script=script.strip(),
         funcion=funcion.strip(), descripcion=descripcion.strip(), estado=estado,
+        fecha_hallazgo=dt.date.fromisoformat(fecha_hallazgo) if fecha_hallazgo else None,
     )
     if not ok:
         return error(msg)
@@ -482,6 +540,8 @@ def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripci
     Output("hal-edit-form-funcion", "value"),
     Output("hal-edit-form-descripcion", "value"),
     Output("hal-edit-form-estado", "value"),
+    Output("hal-edit-form-fecha-hallazgo", "date"),
+    Output("hal-edit-form-fecha-cierre", "date"),
     Input("btn-editar-hallazgo", "n_clicks"),
     State("store-hallazgo-seleccionado", "data"),
     State("hal-clicks-baseline", "data"),
@@ -490,9 +550,10 @@ def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripci
 def open_editar_hallazgo(n_clicks, seleccionado, baseline):
     umbral = (baseline or {}).get("btn-editar-hallazgo", 0)
     if not n_clicks or n_clicks <= umbral or not seleccionado:
-        return (dash.no_update,) * 8
+        return (dash.no_update,) * 10
     return (True, None, seleccionado["proyecto"], seleccionado["motor"], seleccionado["script"],
-            seleccionado["funcion"], seleccionado["descripcion"], seleccionado["estado_actual"])
+            seleccionado["funcion"], seleccionado["descripcion"], seleccionado["estado_actual"],
+            seleccionado.get("fecha_hallazgo"), seleccionado.get("fecha_cierre"))
 
 
 @dash.callback(
@@ -519,9 +580,12 @@ def cancel_editar_hallazgo(_n_clicks):
     State("hal-edit-form-funcion", "value"),
     State("hal-edit-form-descripcion", "value"),
     State("hal-edit-form-estado", "value"),
+    State("hal-edit-form-fecha-hallazgo", "date"),
+    State("hal-edit-form-fecha-cierre", "date"),
     prevent_initial_call=True,
 )
-def guardar_editar_hallazgo(n_clicks, seleccionado, proyecto, motor, script, funcion, descripcion, estado):
+def guardar_editar_hallazgo(n_clicks, seleccionado, proyecto, motor, script, funcion, descripcion, estado,
+                             fecha_hallazgo, fecha_cierre):
     if not n_clicks:
         return (dash.no_update,) * 6
 
@@ -545,8 +609,10 @@ def guardar_editar_hallazgo(n_clicks, seleccionado, proyecto, motor, script, fun
         return error("Selecciona un estado.")
 
     ok, msg = data_mod.edit_hallazgo(
-        **seleccionado, nuevo_proyecto=proyecto, nuevo_motor=motor.strip(), nuevo_script=script.strip(),
+        **_identidad(seleccionado), nuevo_proyecto=proyecto, nuevo_motor=motor.strip(), nuevo_script=script.strip(),
         nuevo_funcion=funcion.strip(), nueva_descripcion=descripcion.strip(), nuevo_estado=estado,
+        nueva_fecha_hallazgo=dt.date.fromisoformat(fecha_hallazgo) if fecha_hallazgo else None,
+        nueva_fecha_cierre=dt.date.fromisoformat(fecha_cierre) if fecha_cierre else None,
     )
     if not ok:
         return error(msg)
@@ -607,7 +673,7 @@ def confirmar_eliminar_hallazgo(n_clicks, seleccionado):
     if not seleccionado:
         return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
 
-    ok, msg = data_mod.delete_hallazgo(**seleccionado)
+    ok, msg = data_mod.delete_hallazgo(**_identidad(seleccionado))
     if ok:
         nuevo_df = data_mod.load_hallazgos()
         return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True
