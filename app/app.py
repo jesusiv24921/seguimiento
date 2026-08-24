@@ -10,7 +10,7 @@ pages/ y solo se preocupa de su propio contenido.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import dash
 import dash_auth
@@ -138,7 +138,46 @@ app.layout = html.Div(className="app-shell", children=[
     dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle(id="modal-actividad-title"), close_button=True),
         dbc.ModalBody(id="modal-actividad-body"),
+        dbc.ModalFooter([
+            dbc.Button([html.I(className="bi bi-flag-fill"), "Generar pendiente desde esta actividad"],
+                        id="btn-generar-pendiente", className="btn-refresh", n_clicks=0),
+        ]),
     ], id="modal-actividad", is_open=False, size="lg", scrollable=True),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Nuevo pendiente"), close_button=True),
+        dbc.ModalBody([
+            html.Div(id="pnd-form-error"),
+            html.Div(id="pnd-form-origen", className="section-caption"),
+            html.Div([html.Div([html.I(className="bi bi-card-text"), "Título del pendiente"], className="filter-label"),
+                       dbc.Input(id="pnd-form-titulo", type="text",
+                                  placeholder="p.ej. Realizar presentación")], className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-text-paragraph"), "Qué hay que hacer"], className="filter-label"),
+                       dbc.Textarea(id="pnd-form-descripcion",
+                                     placeholder="Detalle del pendiente que quedó de la actividad.",
+                                     style={"height": "80px"})], className="mb-3"),
+            dbc.Row([
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-exclamation-circle"), "Prioridad"],
+                                              className="filter-label"),
+                                    dcc.Dropdown(id="pnd-form-prioridad", options=["Alta", "Media", "Baja"],
+                                                  value="Media", clearable=False)], className="mb-3"), md=6),
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-calendar-event"), "Fecha límite (opcional)"],
+                                              className="filter-label"),
+                                    dcc.DatePickerSingle(id="pnd-form-fecha-limite", display_format="DD/MM/YYYY",
+                                                           className="w-100")], className="mb-3"), md=6),
+            ]),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-pendiente", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2"), "Guardar pendiente"],
+                        id="btn-guardar-pendiente", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-nuevo-pendiente", is_open=False, size="lg", scrollable=True),
+
+    dbc.Toast(
+        id="shell-toast", header="Seguimiento de Proyectos", is_open=False, dismissable=True, duration=6000,
+        style={"position": "fixed", "top": 20, "right": 20, "zIndex": 999, "minWidth": "320px"},
+    ),
 ])
 
 
@@ -331,6 +370,108 @@ def open_activity_modal(actividad_id, store_json):
         _modal_field("Observaciones", r["observaciones"]),
     ])
     return True, title, body
+
+
+# --------------------------------------------------------------------------
+# Generar pendiente a partir de una actividad (desde el modal de detalle,
+# disponible sin importar en qué página se abrió: Calendario, Actividades...)
+# --------------------------------------------------------------------------
+@app.callback(
+    Output("modal-nuevo-pendiente", "is_open"),
+    Output("modal-actividad", "is_open", allow_duplicate=True),
+    Output("pnd-form-error", "children"),
+    Output("pnd-form-origen", "children"),
+    Output("pnd-form-titulo", "value"),
+    Output("pnd-form-descripcion", "value"),
+    Output("pnd-form-prioridad", "value"),
+    Output("pnd-form-fecha-limite", "date"),
+    Input("btn-generar-pendiente", "n_clicks"),
+    State("store-selected-activity", "data"),
+    State("store-data", "data"),
+    prevent_initial_call=True,
+)
+def open_generar_pendiente(n_clicks, actividad_id, store_json):
+    vacio = (dash.no_update,) * 8
+    if not n_clicks or not actividad_id:
+        return vacio
+
+    df = df_from_store(store_json)
+    row = df[df["actividad_id"] == actividad_id]
+    if row.empty:
+        return vacio
+    r = row.iloc[0]
+
+    origen = [
+        html.I(className="bi bi-arrow-return-right me-1"),
+        f'Se generará a partir de "{r["actividad"]}" ({r["proyecto"]}, '
+        f'{r["fecha_inicio"].strftime("%d/%m/%Y")}).',
+    ]
+    return True, False, None, origen, None, None, "Media", None
+
+
+@app.callback(
+    Output("modal-nuevo-pendiente", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-pendiente", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancel_generar_pendiente(_n_clicks):
+    return False
+
+
+@app.callback(
+    Output("store-data", "data", allow_duplicate=True),
+    Output("modal-nuevo-pendiente", "is_open", allow_duplicate=True),
+    Output("pnd-form-error", "children", allow_duplicate=True),
+    Output("shell-toast", "children"),
+    Output("shell-toast", "icon"),
+    Output("shell-toast", "is_open"),
+    Input("btn-guardar-pendiente", "n_clicks"),
+    State("store-selected-activity", "data"),
+    State("store-data", "data"),
+    State("pnd-form-titulo", "value"),
+    State("pnd-form-descripcion", "value"),
+    State("pnd-form-prioridad", "value"),
+    State("pnd-form-fecha-limite", "date"),
+    prevent_initial_call=True,
+)
+def guardar_pendiente(_n_clicks, actividad_id, store_json, titulo, descripcion, prioridad, fecha_limite):
+    def error(msg):
+        return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
+                dash.no_update, dash.no_update, dash.no_update)
+
+    if not actividad_id:
+        return error("No hay ninguna actividad de origen seleccionada.")
+    if not titulo or not titulo.strip():
+        return error("Escribe un título para el pendiente.")
+    if not descripcion or not descripcion.strip():
+        return error("Describe qué hay que hacer.")
+
+    df = df_from_store(store_json)
+    row = df[df["actividad_id"] == actividad_id]
+    if row.empty:
+        return error("No se encontró la actividad de origen (los datos pudieron cambiar).")
+    r = row.iloc[0]
+
+    def _clean(v):
+        return None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+
+    fecha_pendiente = date.fromisoformat(fecha_limite) if fecha_limite else date.today()
+    origen_txt = (f'Pendiente generado desde la actividad {actividad_id} '
+                  f'("{r["actividad"]}", {r["fecha_inicio"].strftime("%d/%m/%Y")}).')
+
+    ok, msg = data_mod.add_actividad(
+        fecha_inicio=fecha_pendiente, hora_inicio=time(0, 0), hora_fin=time(0, 0),
+        proyecto_id=_clean(r.get("proyecto_id")), tipo_actividad_id=_clean(r.get("tipo_actividad_id")),
+        categoria_id=_clean(r.get("categoria_id")), actividad=titulo.strip(), descripcion=descripcion.strip(),
+        tema=_clean(r["tema"]) or "Pendiente", resultado="Pendiente por completar",
+        estado="Pendiente", prioridad=prioridad or "Media", motor=_clean(r.get("motor")),
+        observaciones=origen_txt, fecha_fin=fecha_pendiente,
+    )
+    if not ok:
+        return error(msg)
+
+    nuevo_df = data_mod.load_data()["actividades"]
+    return df_to_store(nuevo_df), False, None, "✓ Pendiente creado a partir de la actividad seleccionada.", "success", True
 
 
 if __name__ == "__main__":

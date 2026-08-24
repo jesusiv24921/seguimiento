@@ -258,7 +258,9 @@ def _campos_vacios():
     Input("btn-nueva-actividad", "n_clicks"),
     prevent_initial_call=True,
 )
-def open_nueva_actividad(_n_clicks):
+def open_nueva_actividad(n_clicks):
+    if not n_clicks:
+        return (dash.no_update,) * 18
     return (True, None, *_campos_vacios(), "Nueva actividad", None)
 
 
@@ -286,9 +288,9 @@ def open_nueva_actividad(_n_clicks):
     State("store-data", "data"),
     prevent_initial_call=True,
 )
-def open_editar_actividad(_n_clicks, actividad_id, store_json):
+def open_editar_actividad(n_clicks, actividad_id, store_json):
     vacio = (dash.no_update,) * 18
-    if not actividad_id:
+    if not n_clicks or not actividad_id:
         return vacio
 
     df = df_from_store(store_json)
@@ -412,8 +414,8 @@ def _campo_modal(label: str, value: str) -> html.Div:
     State("store-data", "data"),
     prevent_initial_call=True,
 )
-def open_eliminar_actividad(_n_clicks, actividad_id, store_json):
-    if not actividad_id:
+def open_eliminar_actividad(n_clicks, actividad_id, store_json):
+    if not n_clicks or not actividad_id:
         return dash.no_update, dash.no_update
     df = df_from_store(store_json)
     fila = df[df["actividad_id"] == actividad_id]
@@ -460,3 +462,21 @@ def confirmar_eliminar_actividad(_n_clicks, actividad_id):
         nuevo_df = data_mod.load_data()["actividades"]
         return df_to_store(nuevo_df), False, f"✓ {msg}", "success", True
     return dash.no_update, False, msg, "danger", True
+
+
+# --------------------------------------------------------------------------
+# Asegura que ningún formulario quede abierto al entrar a la página. Los
+# modales solo deben abrirse por un clic explícito en sus botones; esto
+# cierra cualquier estado de "abierto" que el navegador pudiera arrastrar
+# de una visita anterior a esta misma página en la sesión.
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-nueva-actividad", "is_open", allow_duplicate=True),
+    Output("modal-eliminar-actividad", "is_open", allow_duplicate=True),
+    Input("url", "pathname"),
+    prevent_initial_call=True,
+)
+def cerrar_modales_al_entrar(pathname):
+    if pathname != "/actividades":
+        return dash.no_update, dash.no_update
+    return False, False

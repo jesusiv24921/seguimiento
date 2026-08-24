@@ -324,8 +324,8 @@ def _campo_modal(label: str, value: str) -> html.Div:
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
 )
-def open_confirm_modal(_n_clicks, seleccionado):
-    if not seleccionado:
+def open_confirm_modal(n_clicks, seleccionado):
+    if not n_clicks or not seleccionado:
         return dash.no_update, dash.no_update
     body = html.Div([
         html.P("Esta acción cambiará el estado del hallazgo a Cerrado y actualizará el archivo Excel.",
@@ -397,7 +397,9 @@ def update_hallazgo_form_proyecto_options(lookups_json):
     Input("btn-nuevo-hallazgo", "n_clicks"),
     prevent_initial_call=True,
 )
-def open_nuevo_hallazgo(_n_clicks):
+def open_nuevo_hallazgo(n_clicks):
+    if not n_clicks:
+        return (dash.no_update,) * 8
     return True, None, None, "", "", "", "", "Abierto"
 
 
@@ -471,10 +473,9 @@ def guardar_nuevo_hallazgo(_n_clicks, proyecto, motor, script, funcion, descripc
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
 )
-def open_editar_hallazgo(_n_clicks, seleccionado):
-    if not seleccionado:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, \
-               dash.no_update, dash.no_update, dash.no_update, dash.no_update
+def open_editar_hallazgo(n_clicks, seleccionado):
+    if not n_clicks or not seleccionado:
+        return (dash.no_update,) * 8
     return (True, None, seleccionado["proyecto"], seleccionado["motor"], seleccionado["script"],
             seleccionado["funcion"], seleccionado["descripcion"], seleccionado["estado_actual"])
 
@@ -546,8 +547,8 @@ def guardar_editar_hallazgo(_n_clicks, seleccionado, proyecto, motor, script, fu
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
 )
-def open_eliminar_hallazgo(_n_clicks, seleccionado):
-    if not seleccionado:
+def open_eliminar_hallazgo(n_clicks, seleccionado):
+    if not n_clicks or not seleccionado:
         return dash.no_update, dash.no_update
     body = html.Div([
         html.P("Esta acción eliminará el hallazgo de forma permanente del archivo Excel y no se puede deshacer.",
@@ -589,3 +590,23 @@ def confirmar_eliminar_hallazgo(_n_clicks, seleccionado):
         nuevo_df = data_mod.load_hallazgos()
         return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True
     return dash.no_update, False, msg, "danger", True
+
+
+# --------------------------------------------------------------------------
+# Asegura que ningún formulario quede abierto al entrar a la página. Los
+# modales solo deben abrirse por un clic explícito en sus botones; esto
+# cierra cualquier estado de "abierto" que el navegador pudiera arrastrar
+# de una visita anterior a esta misma página en la sesión.
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-nuevo-hallazgo", "is_open", allow_duplicate=True),
+    Output("modal-editar-hallazgo", "is_open", allow_duplicate=True),
+    Output("modal-eliminar-hallazgo", "is_open", allow_duplicate=True),
+    Output("modal-cerrar-hallazgo", "is_open", allow_duplicate=True),
+    Input("url", "pathname"),
+    prevent_initial_call=True,
+)
+def cerrar_modales_al_entrar(pathname):
+    if pathname != "/hallazgos":
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    return False, False, False, False
