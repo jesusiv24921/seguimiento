@@ -304,6 +304,31 @@ body {
 }
 .btn-clear-filters i { margin-right: 0.4rem; }
 
+.dias-habiles-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--radius-sm);
+    background-color: var(--accent-wash);
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+.dias-habiles-badge i { font-size: 0.85rem; flex-shrink: 0; }
+.dias-habiles-badge b { font-size: 0.95rem; font-weight: 800; }
+.dias-habiles-badge-idle {
+    background-color: var(--surface-sunken);
+    color: var(--ink-muted);
+    font-weight: 500;
+}
+.dias-habiles-badge-warning {
+    background-color: var(--critical-wash);
+    color: var(--critical);
+}
+
 /* ---------------------------------------------------------------------
    KPI cards
 --------------------------------------------------------------------- */

@@ -104,7 +104,7 @@ filters_panel = html.Div(className="filters-panel", children=[
         html.Div([
             html.Div([html.I(className="bi bi-calendar3"), "Periodo"], className="filter-label"),
             dcc.DatePickerRange(id="f-fechas", display_format="DD/MM/YYYY", className="w-100", persistence=True, persistence_type="session"),
-            html.Div(id="f-fechas-dias-habiles", className="section-caption", style={"marginTop": "6px"}),
+            html.Div(id="f-fechas-dias-habiles", className="dias-habiles-badge"),
         ], className="filter-field"),
         html.Div([
             html.Div(" ", className="filter-label"),
@@ -256,19 +256,29 @@ def clear_filters(_btn_clicks):
 # --------------------------------------------------------------------------
 @app.callback(
     Output("f-fechas-dias-habiles", "children"),
+    Output("f-fechas-dias-habiles", "className"),
     Input("f-fechas", "start_date"),
     Input("f-fechas", "end_date"),
 )
 def update_dias_habiles_filtro(start_date, end_date):
     if not start_date or not end_date:
-        return ""
+        children = [html.I(className="bi bi-calendar-check"),
+                    html.Span("Selecciona fecha inicial y final para calcular los días hábiles")]
+        return children, "dias-habiles-badge dias-habiles-badge-idle"
+
     s = pd.Timestamp(start_date).date()
     e = pd.Timestamp(end_date).date()
     if e < s:
-        return ""
+        children = [html.I(className="bi bi-exclamation-triangle"),
+                    html.Span("La fecha final debe ser posterior a la inicial")]
+        return children, "dias-habiles-badge dias-habiles-badge-warning"
+
     n_dias, _festivos = data_mod.business_days_worked(s, e)
     etiqueta = "día hábil" if n_dias == 1 else "días hábiles"
-    return [html.I(className="bi bi-calendar-check me-1"), f"{n_dias} {etiqueta} en el rango"]
+    children = [html.I(className="bi bi-calendar-check"),
+                html.Span([html.B(str(n_dias)), f" {etiqueta} entre el "
+                            f"{s.strftime('%d/%m/%Y')} y el {e.strftime('%d/%m/%Y')}"])]
+    return children, "dias-habiles-badge"
 
 
 # --------------------------------------------------------------------------
