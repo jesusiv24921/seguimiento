@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# Proyecto de Power BI y archivo de respaldo, no forman parte de la app Dash
+SeguimientoActividades/
+seguimiento_LIMPIO.xlsx
