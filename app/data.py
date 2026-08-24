@@ -89,26 +89,21 @@ def _clean_text(value) -> str | None:
 
 
 def _fix_date_cell(value):
-    """Corrige fechas nativas de Excel con día/mes invertidos.
+    """Normaliza una celda de fecha a pd.Timestamp.
 
-    Excel (localización en-US) interpreta una fecha tecleada en formato
-    dd/mm/aaaa como mm/dd/aaaa cuando el "día" tecleado es <=12, guardando
-    internamente el valor con día y mes intercambiados. En este archivo eso
-    solo puede ocurrir cuando la celda quedó como fecha nativa (si el día
-    tecleado es >12, Excel no logra interpretarla como fecha y la deja como
-    texto, que se parsea aparte con dayfirst=True). Por eso el intercambio
-    solo se aplica cuando el día resultante es <=12: es la única zona donde
-    la ambigüedad pudo producirse.
+    Históricamente (actividades A001-A015) Excel guardó algunas fechas con
+    día y mes intercambiados, por escribirse a mano en formato dd/mm en un
+    Excel con localización en-US. Esas 15 filas ya se corrigieron de forma
+    permanente y definitiva directamente en el Excel (30 celdas: fecha_inicio
+    y fecha_fin), así que esta función ya no necesita adivinar ni intercambiar
+    nada — todo valor nativo de fecha en el archivo es correcto tal cual está.
     """
     if pd.isna(value):
         return pd.NaT
     if isinstance(value, str):
         return pd.to_datetime(value, dayfirst=True, errors="coerce")
     if isinstance(value, (pd.Timestamp, dt.datetime, dt.date)):
-        ts = pd.Timestamp(value)
-        if ts.day <= 12:
-            return ts.replace(month=ts.day, day=ts.month)
-        return ts
+        return pd.Timestamp(value)
     return pd.NaT
 
 
