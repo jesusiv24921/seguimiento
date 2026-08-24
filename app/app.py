@@ -9,9 +9,11 @@ pages/ y solo se preocupa de su propio contenido.
 """
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta
 
 import dash
+import dash_auth
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, Input, Output, State, dcc, html
@@ -41,6 +43,15 @@ app = dash.Dash(
 server = app.server
 app.index_string = app.index_string.replace("</head>", FONT_AND_ICONS_HEAD + "</head>")
 
+# Usuario/clave vienen de variables de entorno (nunca hardcodeados: el repo
+# de GitHub es público). En local, si no están configuradas, la app queda
+# sin login para facilitar el desarrollo — en Render sí se configuran.
+_auth_user = os.environ.get("SEGUIMIENTO_AUTH_USER")
+_auth_password = os.environ.get("SEGUIMIENTO_AUTH_PASSWORD")
+if _auth_user and _auth_password:
+    server.secret_key = os.environ.get("SEGUIMIENTO_SECRET_KEY", os.urandom(24).hex())
+    dash_auth.BasicAuth(app, {_auth_user: _auth_password})
+
 
 @server.after_request
 def _no_cache_dash_internals(response):
@@ -57,13 +68,13 @@ def _no_cache_dash_internals(response):
 NAV_ITEMS = [
     ("/", "Resumen ejecutivo", "bi-house"),
     ("/actividades", "Actividades", "bi-list-check"),
-    ("/sentinel", "Sentinel Alerts", "bi-shield-check"),
-    ("/hallazgos", "Hallazgos", "bi-clipboard2-check"),
-    ("/new-opps", "New Opps", "bi-rocket-takeoff"),
-    ("/transversales", "Reuniones y Transversales", "bi-people"),
     ("/calendario", "Calendario", "bi-calendar3"),
-    ("/analisis", "Análisis", "bi-bar-chart"),
     ("/bloqueos", "Bloqueos y pendientes", "bi-exclamation-triangle"),
+    ("/transversales", "Reuniones y Transversales", "bi-people"),
+    ("/hallazgos", "Hallazgos", "bi-clipboard2-check"),
+    ("/sentinel", "Sentinel Alerts", "bi-shield-check"),
+    ("/new-opps", "New Opps", "bi-rocket-takeoff"),
+    ("/analisis", "Análisis", "bi-bar-chart"),
 ]
 
 
@@ -93,6 +104,7 @@ filters_panel = html.Div(className="filters-panel", children=[
         html.Div([
             html.Div([html.I(className="bi bi-calendar3"), "Periodo"], className="filter-label"),
             dcc.DatePickerRange(id="f-fechas", display_format="DD/MM/YYYY", className="w-100", persistence=True, persistence_type="session"),
+            html.Div(id="f-fechas-dias-habiles", className="section-caption", style={"marginTop": "6px"}),
         ], className="filter-field"),
         html.Div([
             html.Div(" ", className="filter-label"),
@@ -237,6 +249,26 @@ def update_page_header_period(store_json, start_date, end_date):
 )
 def clear_filters(_btn_clicks):
     return None, None
+
+
+# --------------------------------------------------------------------------
+# Contador de días hábiles (Colombia) del rango de fechas seleccionado
+# --------------------------------------------------------------------------
+@app.callback(
+    Output("f-fechas-dias-habiles", "children"),
+    Input("f-fechas", "start_date"),
+    Input("f-fechas", "end_date"),
+)
+def update_dias_habiles_filtro(start_date, end_date):
+    if not start_date or not end_date:
+        return ""
+    s = pd.Timestamp(start_date).date()
+    e = pd.Timestamp(end_date).date()
+    if e < s:
+        return ""
+    n_dias, _festivos = data_mod.business_days_worked(s, e)
+    etiqueta = "día hábil" if n_dias == 1 else "días hábiles"
+    return [html.I(className="bi bi-calendar-check me-1"), f"{n_dias} {etiqueta} en el rango"]
 
 
 # --------------------------------------------------------------------------

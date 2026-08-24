@@ -14,7 +14,7 @@ from dash import Input, Output, State, dash_table, dcc, html
 import charts
 import data as data_mod
 from components import chart_card, kpi_card, page_header
-from data_store import hallazgos_from_store, hallazgos_to_store
+from data_store import hallazgos_from_store, hallazgos_to_store, lookups_from_store
 from theme import GRID, HALLAZGO_ESTADO_PILL, INK_MUTED, INK_PRIMARY
 
 dash.register_page(__name__, path="/hallazgos", name="Hallazgos", title="Hallazgos")
@@ -36,12 +36,12 @@ layout = html.Div(className="page", children=[
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-pie-chart"), "Estado de los hallazgos"], className="section-title"),
             html.Div("Abiertos, en revisión y cerrados.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="hal-g-estado", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="hal-g-estado", config={"displayModeBar": False, "responsive": True})),
         ]), lg=5, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-bar-chart"), "Hallazgos por motor"], className="section-title"),
             html.Div("¿Dónde se concentran los principales hallazgos técnicos?", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="hal-g-motor", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="hal-g-motor", config={"displayModeBar": False, "responsive": True})),
         ]), lg=7, className="mb-3"),
     ]),
 
@@ -74,7 +74,13 @@ layout = html.Div(className="page", children=[
         html.Div(className="hal-actions-row", children=[
             dbc.Button([html.I(className="bi bi-check2-circle"), "Cerrar hallazgo"],
                         id="btn-cerrar-hallazgo", className="btn-refresh", disabled=True),
+            dbc.Button([html.I(className="bi bi-pencil"), "Editar"],
+                        id="btn-editar-hallazgo", className="btn-refresh", disabled=True),
+            dbc.Button([html.I(className="bi bi-trash"), "Eliminar"],
+                        id="btn-eliminar-hallazgo", className="btn-refresh", disabled=True),
             html.Div(id="hal-selection-msg", className="hal-selection-msg"),
+            dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo hallazgo"],
+                        id="btn-nuevo-hallazgo", className="btn-refresh ms-auto", n_clicks=0),
         ]),
         dash_table.DataTable(
             id="hal-tabla",
@@ -120,6 +126,74 @@ layout = html.Div(className="page", children=[
                         id="btn-confirmar-cierre", className="btn-refresh", n_clicks=0),
         ]),
     ], id="modal-cerrar-hallazgo", is_open=False),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Nuevo hallazgo"), close_button=True),
+        dbc.ModalBody([
+            html.Div(id="hal-form-error"),
+            html.Div([html.Div([html.I(className="bi bi-folder2"), "Proyecto"], className="filter-label"),
+                       dcc.Dropdown(id="hal-form-proyecto", placeholder="Selecciona un proyecto")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-cpu"), "Motor"], className="filter-label"),
+                       dbc.Input(id="hal-form-motor", type="text", placeholder="Nombre del motor/engine")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-file-earmark-code"), "Script"], className="filter-label"),
+                       dbc.Input(id="hal-form-script", type="text", placeholder="p.ej. engine.py")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-code-slash"), "Función"], className="filter-label"),
+                       dbc.Input(id="hal-form-funcion", type="text", placeholder="p.ej. evaluate_rules()")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-text-paragraph"), "Descripción"], className="filter-label"),
+                       dbc.Textarea(id="hal-form-descripcion", placeholder="Descripción del hallazgo.",
+                                     style={"height": "90px"})],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
+                       dcc.Dropdown(id="hal-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
+                                     value="Abierto", clearable=False)],
+                       className="mb-3"),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-nuevo-hallazgo", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2"), "Guardar hallazgo"],
+                        id="btn-guardar-nuevo-hallazgo", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-nuevo-hallazgo", is_open=False, size="lg", scrollable=True),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Editar hallazgo"), close_button=True),
+        dbc.ModalBody([
+            html.Div(id="hal-edit-form-error"),
+            html.Div([html.Div([html.I(className="bi bi-folder2"), "Proyecto"], className="filter-label"),
+                       dcc.Dropdown(id="hal-edit-form-proyecto", placeholder="Selecciona un proyecto")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-cpu"), "Motor"], className="filter-label"),
+                       dbc.Input(id="hal-edit-form-motor", type="text")], className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-file-earmark-code"), "Script"], className="filter-label"),
+                       dbc.Input(id="hal-edit-form-script", type="text")], className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-code-slash"), "Función"], className="filter-label"),
+                       dbc.Input(id="hal-edit-form-funcion", type="text")], className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-text-paragraph"), "Descripción"], className="filter-label"),
+                       dbc.Textarea(id="hal-edit-form-descripcion", style={"height": "90px"})], className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
+                       dcc.Dropdown(id="hal-edit-form-estado", options=data_mod.HALLAZGOS_ESTADOS,
+                                     clearable=False)], className="mb-3"),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-editar-hallazgo", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2"), "Guardar cambios"],
+                        id="btn-guardar-editar-hallazgo", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-editar-hallazgo", is_open=False, size="lg", scrollable=True),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("¿Eliminar este hallazgo?"), close_button=True),
+        dbc.ModalBody(id="hal-eliminar-modal-body"),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-eliminar-hallazgo", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-trash"), "Eliminar definitivamente"],
+                        id="btn-confirmar-eliminar-hallazgo", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-eliminar-hallazgo", is_open=False),
 
     dbc.Toast(
         id="hal-toast", header="Hallazgos", is_open=False, dismissable=True, duration=6000,
@@ -204,6 +278,8 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
 # --------------------------------------------------------------------------
 @dash.callback(
     Output("btn-cerrar-hallazgo", "disabled"),
+    Output("btn-editar-hallazgo", "disabled"),
+    Output("btn-eliminar-hallazgo", "disabled"),
     Output("hal-selection-msg", "children"),
     Output("store-hallazgo-seleccionado", "data"),
     Input("hal-tabla", "selected_rows"),
@@ -212,24 +288,23 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
 def update_hallazgo_selection(selected_rows, table_data):
     selected_rows = selected_rows or []
     if len(selected_rows) == 0:
-        return True, "Selecciona un hallazgo para continuar.", None
+        return True, True, True, "Selecciona un hallazgo para continuar.", None
     if len(selected_rows) > 1:
-        return True, "Selecciona únicamente un hallazgo para realizar el cierre.", None
+        return True, True, True, "Selecciona únicamente un hallazgo para continuar.", None
 
     idx = selected_rows[0]
     if not table_data or idx >= len(table_data):
-        return True, "Selecciona un hallazgo para continuar.", None
+        return True, True, True, "Selecciona un hallazgo para continuar.", None
 
     row = table_data[idx]
-    if row["Estado"] == "Cerrado":
-        return True, "Este hallazgo ya está cerrado.", None
-
     seleccionado = {
         "proyecto": row.get("Proyecto", "Sentinel Alerts"),
         "motor": row["Motor"], "script": row["Script"], "funcion": row["Función"],
         "descripcion": row["Descripción"], "estado_actual": row["Estado"],
     }
-    return False, "", seleccionado
+    if row["Estado"] == "Cerrado":
+        return True, False, False, "Este hallazgo ya está cerrado.", seleccionado
+    return False, False, False, "", seleccionado
 
 
 def _campo_modal(label: str, value: str) -> html.Div:
@@ -275,9 +350,9 @@ def cancel_close(_n_clicks):
 @dash.callback(
     Output("store-hallazgos", "data", allow_duplicate=True),
     Output("modal-cerrar-hallazgo", "is_open", allow_duplicate=True),
-    Output("hal-toast", "children"),
-    Output("hal-toast", "icon"),
-    Output("hal-toast", "is_open"),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
     Input("btn-confirmar-cierre", "n_clicks"),
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
@@ -287,6 +362,229 @@ def confirm_close(_n_clicks, seleccionado):
         return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
 
     ok, msg = data_mod.close_hallazgo(**seleccionado)
+    if ok:
+        nuevo_df = data_mod.load_hallazgos()
+        return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True
+    return dash.no_update, False, msg, "danger", True
+
+
+# --------------------------------------------------------------------------
+# Opciones de Proyecto para los formularios de alta/edición (catálogo real)
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("hal-form-proyecto", "options"),
+    Output("hal-edit-form-proyecto", "options"),
+    Input("store-lookups", "data"),
+)
+def update_hallazgo_form_proyecto_options(lookups_json):
+    lookups = lookups_from_store(lookups_json)
+    opts = [{"label": r["proyecto"], "value": r["proyecto"]} for r in lookups["proyectos"]]
+    return opts, opts
+
+
+# --------------------------------------------------------------------------
+# Nuevo hallazgo: abrir / cancelar / guardar
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-nuevo-hallazgo", "is_open"),
+    Output("hal-form-error", "children"),
+    Output("hal-form-proyecto", "value"),
+    Output("hal-form-motor", "value"),
+    Output("hal-form-script", "value"),
+    Output("hal-form-funcion", "value"),
+    Output("hal-form-descripcion", "value"),
+    Output("hal-form-estado", "value"),
+    Input("btn-nuevo-hallazgo", "n_clicks"),
+    prevent_initial_call=True,
+)
+def open_nuevo_hallazgo(_n_clicks):
+    return True, None, None, "", "", "", "", "Abierto"
+
+
+@dash.callback(
+    Output("modal-nuevo-hallazgo", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-nuevo-hallazgo", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancel_nuevo_hallazgo(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("store-hallazgos", "data", allow_duplicate=True),
+    Output("modal-nuevo-hallazgo", "is_open", allow_duplicate=True),
+    Output("hal-form-error", "children", allow_duplicate=True),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
+    Input("btn-guardar-nuevo-hallazgo", "n_clicks"),
+    State("hal-form-proyecto", "value"),
+    State("hal-form-motor", "value"),
+    State("hal-form-script", "value"),
+    State("hal-form-funcion", "value"),
+    State("hal-form-descripcion", "value"),
+    State("hal-form-estado", "value"),
+    prevent_initial_call=True,
+)
+def guardar_nuevo_hallazgo(_n_clicks, proyecto, motor, script, funcion, descripcion, estado):
+    def error(msg):
+        return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
+                dash.no_update, dash.no_update, dash.no_update)
+
+    if not proyecto:
+        return error("Selecciona un proyecto.")
+    if not motor or not motor.strip():
+        return error("Escribe el nombre del motor.")
+    if not script or not script.strip():
+        return error("Escribe el nombre del script.")
+    if not funcion or not funcion.strip():
+        return error("Escribe el nombre de la función.")
+    if not descripcion or not descripcion.strip():
+        return error("Escribe una descripción del hallazgo.")
+    if not estado:
+        return error("Selecciona un estado.")
+
+    ok, msg = data_mod.add_hallazgo(
+        proyecto=proyecto, motor=motor.strip(), script=script.strip(),
+        funcion=funcion.strip(), descripcion=descripcion.strip(), estado=estado,
+    )
+    if not ok:
+        return error(msg)
+
+    nuevo_df = data_mod.load_hallazgos()
+    return hallazgos_to_store(nuevo_df), False, None, f"✓ {msg}", "success", True
+
+
+# --------------------------------------------------------------------------
+# Editar hallazgo: abrir (prellenado) / cancelar / guardar
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-editar-hallazgo", "is_open"),
+    Output("hal-edit-form-error", "children"),
+    Output("hal-edit-form-proyecto", "value"),
+    Output("hal-edit-form-motor", "value"),
+    Output("hal-edit-form-script", "value"),
+    Output("hal-edit-form-funcion", "value"),
+    Output("hal-edit-form-descripcion", "value"),
+    Output("hal-edit-form-estado", "value"),
+    Input("btn-editar-hallazgo", "n_clicks"),
+    State("store-hallazgo-seleccionado", "data"),
+    prevent_initial_call=True,
+)
+def open_editar_hallazgo(_n_clicks, seleccionado):
+    if not seleccionado:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, \
+               dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    return (True, None, seleccionado["proyecto"], seleccionado["motor"], seleccionado["script"],
+            seleccionado["funcion"], seleccionado["descripcion"], seleccionado["estado_actual"])
+
+
+@dash.callback(
+    Output("modal-editar-hallazgo", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-editar-hallazgo", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancel_editar_hallazgo(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("store-hallazgos", "data", allow_duplicate=True),
+    Output("modal-editar-hallazgo", "is_open", allow_duplicate=True),
+    Output("hal-edit-form-error", "children", allow_duplicate=True),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
+    Input("btn-guardar-editar-hallazgo", "n_clicks"),
+    State("store-hallazgo-seleccionado", "data"),
+    State("hal-edit-form-proyecto", "value"),
+    State("hal-edit-form-motor", "value"),
+    State("hal-edit-form-script", "value"),
+    State("hal-edit-form-funcion", "value"),
+    State("hal-edit-form-descripcion", "value"),
+    State("hal-edit-form-estado", "value"),
+    prevent_initial_call=True,
+)
+def guardar_editar_hallazgo(_n_clicks, seleccionado, proyecto, motor, script, funcion, descripcion, estado):
+    def error(msg):
+        return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
+                dash.no_update, dash.no_update, dash.no_update)
+
+    if not seleccionado:
+        return error("No hay ningún hallazgo seleccionado.")
+    if not proyecto:
+        return error("Selecciona un proyecto.")
+    if not motor or not motor.strip():
+        return error("Escribe el nombre del motor.")
+    if not script or not script.strip():
+        return error("Escribe el nombre del script.")
+    if not funcion or not funcion.strip():
+        return error("Escribe el nombre de la función.")
+    if not descripcion or not descripcion.strip():
+        return error("Escribe una descripción del hallazgo.")
+    if not estado:
+        return error("Selecciona un estado.")
+
+    ok, msg = data_mod.edit_hallazgo(
+        **seleccionado, nuevo_proyecto=proyecto, nuevo_motor=motor.strip(), nuevo_script=script.strip(),
+        nuevo_funcion=funcion.strip(), nueva_descripcion=descripcion.strip(), nuevo_estado=estado,
+    )
+    if not ok:
+        return error(msg)
+
+    nuevo_df = data_mod.load_hallazgos()
+    return hallazgos_to_store(nuevo_df), False, None, f"✓ {msg}", "success", True
+
+
+# --------------------------------------------------------------------------
+# Eliminar hallazgo: abrir confirmación / cancelar / confirmar
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-eliminar-hallazgo", "is_open"),
+    Output("hal-eliminar-modal-body", "children"),
+    Input("btn-eliminar-hallazgo", "n_clicks"),
+    State("store-hallazgo-seleccionado", "data"),
+    prevent_initial_call=True,
+)
+def open_eliminar_hallazgo(_n_clicks, seleccionado):
+    if not seleccionado:
+        return dash.no_update, dash.no_update
+    body = html.Div([
+        html.P("Esta acción eliminará el hallazgo de forma permanente del archivo Excel y no se puede deshacer.",
+                className="section-caption", style={"color": "#a52323"}),
+        _campo_modal("Motor", seleccionado["motor"]),
+        _campo_modal("Script", seleccionado["script"]),
+        _campo_modal("Función", seleccionado["funcion"]),
+        _campo_modal("Descripción", seleccionado["descripcion"]),
+        _campo_modal("Estado", seleccionado["estado_actual"]),
+    ])
+    return True, body
+
+
+@dash.callback(
+    Output("modal-eliminar-hallazgo", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-eliminar-hallazgo", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancel_eliminar_hallazgo(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("store-hallazgos", "data", allow_duplicate=True),
+    Output("modal-eliminar-hallazgo", "is_open", allow_duplicate=True),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
+    Input("btn-confirmar-eliminar-hallazgo", "n_clicks"),
+    State("store-hallazgo-seleccionado", "data"),
+    prevent_initial_call=True,
+)
+def confirmar_eliminar_hallazgo(_n_clicks, seleccionado):
+    if not seleccionado:
+        return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
+
+    ok, msg = data_mod.delete_hallazgo(**seleccionado)
     if ok:
         nuevo_df = data_mod.load_hallazgos()
         return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True

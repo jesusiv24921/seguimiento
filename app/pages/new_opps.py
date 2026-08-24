@@ -29,12 +29,12 @@ layout = html.Div(className="page", children=[
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-graph-up-arrow"), "Evolución de horas"], className="section-title"),
             html.Div("Horas invertidas en New Opps, semana a semana.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-evolucion", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-evolucion", config={"displayModeBar": False, "responsive": True})),
         ]), lg=7, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-flag"), "Estado del trabajo"], className="section-title"),
             html.Div("Completado, en progreso, bloqueado.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-estado", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-estado", config={"displayModeBar": False, "responsive": True})),
         ]), lg=5, className="mb-3"),
     ]),
 
@@ -42,7 +42,7 @@ layout = html.Div(className="page", children=[
         html.Div([html.I(className="bi bi-diagram-3"), "Tipo de actividad"], className="section-title"),
         html.Div("Reuniones, análisis, soporte y demás — dónde se concentra el trabajo de New Opps.",
                   className="section-caption"),
-        dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-tipo", config={"displayModeBar": False})),
+        dcc.Loading(type="circle", children=dcc.Graph(id="nop-g-tipo", config={"displayModeBar": False, "responsive": True})),
     ]),
 
     chart_card([

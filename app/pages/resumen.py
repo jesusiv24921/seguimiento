@@ -37,12 +37,12 @@ layout = html.Div(className="page", children=[
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-pie-chart"), "Distribución del trabajo"], className="section-title"),
             html.Div("Dónde se concentran las horas registradas.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-proyecto", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-proyecto", config={"displayModeBar": False, "responsive": True})),
         ]), lg=5, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-graph-up-arrow"), "Evolución temporal"], className="section-title"),
             html.Div("Horas invertidas cada semana, por proyecto.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-evolucion", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-evolucion", config={"displayModeBar": False, "responsive": True})),
         ]), lg=7, className="mb-3"),
     ]),
 
@@ -50,7 +50,7 @@ layout = html.Div(className="page", children=[
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-flag"), "Estado de las actividades"], className="section-title"),
             html.Div("Completado, en progreso y bloqueado.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-estado", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="res-g-estado", config={"displayModeBar": False, "responsive": True})),
         ]), lg=5, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-exclamation-triangle"), "Bloqueos y pendientes"],

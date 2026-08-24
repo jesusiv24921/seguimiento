@@ -146,6 +146,45 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   Tablet: objetivos de toque más grandes y menos densidad visual.
+   1024px cubre tablets en horizontal (donde el sidebar sigue vertical,
+   fijo, porque hay espacio de sobra) y en vertical (donde ya se activó
+   el breakpoint de 992px de arriba).
+--------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+    .btn-refresh, .btn-clear-filters, .btn-cal-nav, .btn-cal-today {
+        min-height: 44px;
+    }
+    .nav-link-item { min-height: 44px; padding: 0.7rem 0.9rem; }
+    .filters-panel { padding: 1rem; }
+    .filters-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .chart-card { padding: 1rem 1rem 0.6rem 1rem; }
+    .kpi-card { padding: 1rem; }
+    .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .cal-day { min-height: 72px; }
+    .page-header-title { font-size: 1.3rem; }
+    .modal-header, .modal-body { padding: 1rem !important; }
+
+    /* Casillas de selección de fila en las tablas (Hallazgos/Actividades):
+       el tamaño por defecto de Dash (~13px) es difícil de tocar con precisión. */
+    .dash-spreadsheet-container input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+    }
+    .dash-table-container { -webkit-overflow-scrolling: touch; }
+}
+
+@media (max-width: 640px) {
+    .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+    .filters-grid { grid-template-columns: 1fr; }
+    .cal-day { min-height: 54px; padding: 4px 5px; }
+    .cal-day-holiday-label { display: none; }
+    .cal-hero { flex-wrap: wrap; }
+    .page-header-period { white-space: normal; }
+}
+
+/* ---------------------------------------------------------------------
    Top bar (dentro del área de contenido)
 --------------------------------------------------------------------- */
 .topbar {
@@ -659,7 +698,8 @@ body {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
     margin-bottom: 1.1rem;
 }
 .page-header-title {
@@ -801,7 +841,8 @@ body {
 .hal-actions-row {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.9rem;
     margin: 0.4rem 0 0.9rem 0;
 }
 .hal-selection-msg {

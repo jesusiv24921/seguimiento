@@ -17,6 +17,7 @@ STORE_COLUMNS = [
     "proyecto", "tipo_actividad", "categoria", "actividad", "descripcion",
     "tema", "resultado", "estado", "prioridad", "motor", "observaciones",
     "semana_label", "semana_inicio", "mes_label", "dia_semana", "fecha",
+    "proyecto_id", "tipo_actividad_id", "categoria_id",
 ]
 
 DATE_COLS = ["fecha_inicio", "fecha_fin", "inicio_dt", "fin_dt", "semana_inicio", "fecha"]

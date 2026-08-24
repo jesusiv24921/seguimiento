@@ -19,19 +19,19 @@ layout = html.Div(className="page", children=[
         html.Div([html.I(className="bi bi-bar-chart"), "Horas por proyecto"], className="section-title"),
         html.Div("¿Dónde se concentran mis horas: Sentinel Alerts, New Opps o transversal?",
                   className="section-caption"),
-        dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-proyecto", config={"displayModeBar": False})),
+        dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-proyecto", config={"displayModeBar": False, "responsive": True})),
     ]),
 
     dbc.Row([
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-calendar-week"), "Actividades por día"], className="section-title"),
             html.Div("¿Qué tan seguido registro trabajo?", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-act-dia", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-act-dia", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-clock-history"), "Horas por día"], className="section-title"),
             html.Div("¿Qué días concentro más tiempo de trabajo?", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-horas-dia", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-horas-dia", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
     ]),
 
@@ -40,13 +40,13 @@ layout = html.Div(className="page", children=[
             html.Div([html.I(className="bi bi-tags"), "Actividades por categoría"], className="section-title"),
             html.Div("¿En qué tipo de trabajo temático estoy invirtiendo más actividades?",
                       className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-categoria", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-categoria", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-diagram-3"), "Actividades por tipo"], className="section-title"),
             html.Div("¿Cuánto de mi trabajo es análisis vs. reuniones vs. documentación?",
                       className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-tipo", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="ana-g-tipo", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
     ]),
 ])

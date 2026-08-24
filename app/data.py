@@ -391,6 +391,189 @@ def close_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descrip
     return True, "Hallazgo cerrado correctamente."
 
 
+def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str,
+                  estado: str, path: Path | str | None = None) -> tuple[bool, str]:
+    """Agrega una fila nueva al final de HALLAZGOS. Rechaza el alta si ya
+    existe un hallazgo idéntico (misma combinación Proyecto+Motor+Script+
+    Función+Descripción), porque close_hallazgo() identifica los registros
+    por esa combinación y dos filas iguales lo volverían ambiguo."""
+    path = path if path is not None else EXCEL_PATH
+
+    def _norm(v) -> str:
+        return "" if v is None else str(v).strip()
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible agregar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if HALLAZGOS_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña HALLAZGOS en el archivo."
+
+    ws = wb[HALLAZGOS_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in HALLAZGOS_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de HALLAZGOS cambió y no se pudo actualizar de forma segura."
+
+    objetivo = (_norm(proyecto), _norm(motor), _norm(script), _norm(funcion), _norm(descripcion))
+    for r in range(2, ws.max_row + 1):
+        clave = tuple(_norm(ws.cell(row=r, column=col_idx[c]).value)
+                       for c in ["Proyecto", "Motor", "Script", "Función", "Descripción"])
+        if clave == objetivo:
+            return False, "Ya existe un hallazgo idéntico (mismo proyecto, motor, script, función y descripción)."
+
+    fila = ws.max_row + 1
+    valores = {"Proyecto": proyecto, "Motor": motor, "Script": script, "Función": funcion,
+               "Descripción": descripcion, "Estado": estado}
+    for nombre, valor in valores.items():
+        ws.cell(row=fila, column=col_idx[nombre]).value = valor
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible agregar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, "Hallazgo agregado correctamente."
+
+
+def edit_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str, estado_actual: str,
+                   nuevo_proyecto: str, nuevo_motor: str, nuevo_script: str, nuevo_funcion: str,
+                   nueva_descripcion: str, nuevo_estado: str,
+                   path: Path | str | None = None) -> tuple[bool, str]:
+    """Modifica un hallazgo existente (cualquier columna). El registro original
+    se identifica por la combinación completa Proyecto+Motor+Script+Función+
+    Descripción+Estado tal como estaba cuando se cargó el dashboard, para no
+    pisar un cambio hecho por otra persona mientras tanto. Si la nueva
+    combinación Proyecto+Motor+Script+Función+Descripción coincide con la de
+    otro hallazgo existente, se rechaza para no crear una ambigüedad que
+    después impida cerrar/editar/borrar cualquiera de los dos."""
+    path = path if path is not None else EXCEL_PATH
+
+    def _norm(v) -> str:
+        return "" if v is None else str(v).strip()
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible actualizar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if HALLAZGOS_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña HALLAZGOS en el archivo."
+
+    ws = wb[HALLAZGOS_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in HALLAZGOS_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de HALLAZGOS cambió y no se pudo actualizar de forma segura."
+
+    objetivo = (_norm(proyecto), _norm(motor), _norm(script), _norm(funcion), _norm(descripcion))
+    nuevo_key = (_norm(nuevo_proyecto), _norm(nuevo_motor), _norm(nuevo_script),
+                 _norm(nuevo_funcion), _norm(nueva_descripcion))
+
+    filas_encontradas = []
+    filas_conflicto = []
+    for r in range(2, ws.max_row + 1):
+        clave = tuple(_norm(ws.cell(row=r, column=col_idx[c]).value)
+                       for c in ["Proyecto", "Motor", "Script", "Función", "Descripción"])
+        if clave == objetivo:
+            filas_encontradas.append(r)
+        elif clave == nuevo_key:
+            filas_conflicto.append(r)
+
+    if not filas_encontradas:
+        return False, "No se encontró el hallazgo seleccionado en el archivo (los datos pudieron cambiar)."
+    if len(filas_encontradas) > 1:
+        return False, ("Existe más de un hallazgo idéntico en el archivo; no es posible identificar "
+                        "cuál editar de forma segura. Revisa el Excel manualmente.")
+    if filas_conflicto:
+        return False, "Ya existe otro hallazgo con esa misma combinación de proyecto, motor, script, función y descripción."
+
+    fila = filas_encontradas[0]
+    estado_cell = ws.cell(row=fila, column=col_idx["Estado"])
+    if _norm(estado_cell.value) != _norm(estado_actual):
+        return False, ("Este hallazgo cambió desde que se cargó la página. Actualiza los datos e inténtalo de nuevo.")
+
+    valores = {"Proyecto": nuevo_proyecto, "Motor": nuevo_motor, "Script": nuevo_script,
+               "Función": nuevo_funcion, "Descripción": nueva_descripcion, "Estado": nuevo_estado}
+    for nombre, valor in valores.items():
+        ws.cell(row=fila, column=col_idx[nombre]).value = valor
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible actualizar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, "Hallazgo actualizado correctamente."
+
+
+def delete_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str,
+                     estado_actual: str, path: Path | str | None = None) -> tuple[bool, str]:
+    """Elimina permanentemente la fila de un hallazgo en HALLAZGOS. Se
+    identifica por la combinación completa Proyecto+Motor+Script+Función+
+    Descripción+Estado vista en el dashboard, igual que close_hallazgo, para
+    evitar borrar la fila equivocada o una fila que cambió mientras tanto.
+    Esta acción no se puede deshacer desde la aplicación."""
+    path = path if path is not None else EXCEL_PATH
+
+    def _norm(v) -> str:
+        return "" if v is None else str(v).strip()
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible eliminar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if HALLAZGOS_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña HALLAZGOS en el archivo."
+
+    ws = wb[HALLAZGOS_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in HALLAZGOS_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de HALLAZGOS cambió y no se pudo actualizar de forma segura."
+
+    objetivo = (_norm(proyecto), _norm(motor), _norm(script), _norm(funcion), _norm(descripcion))
+    filas_encontradas = []
+    for r in range(2, ws.max_row + 1):
+        clave = tuple(_norm(ws.cell(row=r, column=col_idx[c]).value)
+                       for c in ["Proyecto", "Motor", "Script", "Función", "Descripción"])
+        if clave == objetivo:
+            filas_encontradas.append(r)
+
+    if not filas_encontradas:
+        return False, "No se encontró el hallazgo seleccionado en el archivo (los datos pudieron cambiar)."
+    if len(filas_encontradas) > 1:
+        return False, ("Existe más de un hallazgo idéntico en el archivo; no es posible identificar "
+                        "cuál eliminar de forma segura. Revisa el Excel manualmente.")
+
+    fila = filas_encontradas[0]
+    estado_cell = ws.cell(row=fila, column=col_idx["Estado"])
+    if _norm(estado_cell.value) != _norm(estado_actual):
+        return False, ("Este hallazgo cambió desde que se cargó la página. Actualiza los datos e inténtalo de nuevo.")
+
+    ws.delete_rows(fila, 1)
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible eliminar el hallazgo. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, "Hallazgo eliminado correctamente."
+
+
 def next_actividad_id(path: Path | str | None = None) -> str:
     """Siguiente ID secuencial tipo 'A035' a partir del mayor existente."""
     path = path if path is not None else EXCEL_PATH
@@ -458,3 +641,106 @@ def add_actividad(fecha_inicio: dt.date, hora_inicio: dt.time, hora_fin: dt.time
         return False, ("No fue posible agregar la actividad. Verifique que el archivo Excel "
                         "no esté abierto o bloqueado por otro usuario.")
     return True, f"Actividad {new_id} agregada correctamente."
+
+
+def update_actividad(actividad_id: str, fecha_inicio: dt.date, hora_inicio: dt.time, hora_fin: dt.time,
+                      proyecto_id: str | None, tipo_actividad_id: str, categoria_id: str | None,
+                      actividad: str, descripcion: str, tema: str, resultado: str,
+                      estado: str, prioridad: str, motor: str | None = None,
+                      observaciones: str | None = None, fecha_fin: dt.date | None = None,
+                      path: Path | str | None = None) -> tuple[bool, str]:
+    """Sobrescribe los campos editables de una actividad existente,
+    identificada por su actividad_id (único, nunca cambia). No borra la fila
+    ni afecta otras actividades."""
+    path = path if path is not None else EXCEL_PATH
+    fecha_fin = fecha_fin or fecha_inicio
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible actualizar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if ACTIVIDADES_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña ACTIVIDADES en el archivo."
+
+    ws = wb[ACTIVIDADES_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in ACTIVIDADES_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de ACTIVIDADES cambió y no se pudo actualizar de forma segura."
+
+    filas_encontradas = [r for r in range(2, ws.max_row + 1)
+                          if str(ws.cell(row=r, column=col_idx["actividad_id"]).value or "") == str(actividad_id)]
+    if not filas_encontradas:
+        return False, "No se encontró la actividad seleccionada en el archivo (los datos pudieron cambiar)."
+    if len(filas_encontradas) > 1:
+        return False, "Existe más de una fila con el mismo ID; no es posible actualizar de forma segura."
+
+    fila = filas_encontradas[0]
+    valores = {
+        "fecha_inicio": fecha_inicio, "fecha_fin": fecha_fin,
+        "hora_inicio": hora_inicio, "hora_fin": hora_fin,
+        "proyecto_id": proyecto_id or None, "tipo_actividad_id": tipo_actividad_id,
+        "categoria_id": categoria_id or None, "actividad": actividad, "descripcion": descripcion,
+        "tema": tema, "resultado": resultado, "estado": estado, "prioridad": prioridad,
+        "motor": motor or None, "observaciones": observaciones or None,
+    }
+    for nombre, valor in valores.items():
+        celda = ws.cell(row=fila, column=col_idx[nombre])
+        celda.value = valor
+        if nombre in ("fecha_inicio", "fecha_fin"):
+            celda.number_format = "DD/MM/YYYY"
+        elif nombre in ("hora_inicio", "hora_fin"):
+            celda.number_format = "HH:MM"
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible actualizar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, f"Actividad {actividad_id} actualizada correctamente."
+
+
+def delete_actividad(actividad_id: str, path: Path | str | None = None) -> tuple[bool, str]:
+    """Elimina permanentemente la fila de una actividad en ACTIVIDADES,
+    identificada por su actividad_id. Esta acción no se puede deshacer desde
+    la aplicación."""
+    path = path if path is not None else EXCEL_PATH
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible eliminar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if ACTIVIDADES_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña ACTIVIDADES en el archivo."
+
+    ws = wb[ACTIVIDADES_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in ACTIVIDADES_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de ACTIVIDADES cambió y no se pudo actualizar de forma segura."
+
+    filas_encontradas = [r for r in range(2, ws.max_row + 1)
+                          if str(ws.cell(row=r, column=col_idx["actividad_id"]).value or "") == str(actividad_id)]
+    if not filas_encontradas:
+        return False, "No se encontró la actividad seleccionada en el archivo (los datos pudieron cambiar)."
+    if len(filas_encontradas) > 1:
+        return False, "Existe más de una fila con el mismo ID; no es posible eliminar de forma segura."
+
+    ws.delete_rows(filas_encontradas[0], 1)
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible eliminar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, f"Actividad {actividad_id} eliminada correctamente."

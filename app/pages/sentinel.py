@@ -44,12 +44,12 @@ layout = html.Div(className="page", children=[
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-graph-up-arrow"), "Evolución de horas"], className="section-title"),
             html.Div("Horas invertidas en Sentinel Alerts, semana a semana.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-evolucion", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-evolucion", config={"displayModeBar": False, "responsive": True})),
         ]), lg=7, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-flag"), "Estado del trabajo"], className="section-title"),
             html.Div("Completado, en progreso, bloqueado.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-estado", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-estado", config={"displayModeBar": False, "responsive": True})),
         ]), lg=5, className="mb-3"),
     ]),
 
@@ -58,7 +58,7 @@ layout = html.Div(className="page", children=[
         html.Div("Agrupado por el tema/categoría real de cada actividad — la columna \"motor\" está vacía en "
                   "los datos actuales, así que no se listan motores individuales para no inventar información.",
                   className="section-caption"),
-        dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-temas", config={"displayModeBar": False})),
+        dcc.Loading(type="circle", children=dcc.Graph(id="sen-g-temas", config={"displayModeBar": False, "responsive": True})),
     ]),
 ])
 

@@ -30,13 +30,13 @@ layout = html.Div(className="page", children=[
                       className="section-title"),
             html.Div("Capacitación, reunión, soporte y demás — agrupado por el campo real "
                       "tipo_actividad del Excel.", className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="trv-g-tipo", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="trv-g-tipo", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
         dbc.Col(chart_card([
             html.Div([html.I(className="bi bi-graph-up-arrow"), "Evolución en el tiempo"], className="section-title"),
             html.Div("Horas invertidas cada semana en actividades transversales y reuniones.",
                       className="section-caption"),
-            dcc.Loading(type="circle", children=dcc.Graph(id="trv-g-evolucion", config={"displayModeBar": False})),
+            dcc.Loading(type="circle", children=dcc.Graph(id="trv-g-evolucion", config={"displayModeBar": False, "responsive": True})),
         ]), lg=6, className="mb-3"),
     ]),
 
