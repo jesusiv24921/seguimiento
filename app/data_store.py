@@ -85,3 +85,23 @@ def hallazgos_from_store(json_str: str | None) -> pd.DataFrame:
     if not json_str:
         return pd.DataFrame(columns=HALLAZGOS_COLUMNS)
     return pd.read_json(io.StringIO(json_str), orient="records")
+
+
+# --------------------------------------------------------------------------
+# Catálogos (PROYECTOS / TIPOS_ACTIVIDAD / CATEGORIAS) — para llenar los
+# dropdowns del formulario "Nueva actividad" con las opciones reales del
+# Excel, en vez de tenerlas hardcodeadas en el código.
+# --------------------------------------------------------------------------
+def lookups_to_store(proyectos: pd.DataFrame, tipos: pd.DataFrame, categorias: pd.DataFrame) -> str:
+    payload = {
+        "proyectos": proyectos[["proyecto_id", "proyecto"]].to_dict("records"),
+        "tipos": tipos[["tipo_actividad_id", "tipo_actividad"]].to_dict("records"),
+        "categorias": categorias[["categoria_id", "categoria"]].to_dict("records"),
+    }
+    return json.dumps(payload)
+
+
+def lookups_from_store(json_str: str | None) -> dict:
+    if not json_str:
+        return {"proyectos": [], "tipos": [], "categorias": []}
+    return json.loads(json_str)

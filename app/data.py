@@ -40,6 +40,13 @@ HALLAZGOS_SHEET = "HALLAZGOS"
 HALLAZGOS_COLUMNS = ["Proyecto", "Motor", "Script", "Función", "Descripción", "Estado"]
 HALLAZGOS_ESTADOS = ["Abierto", "En revisión", "Cerrado"]
 
+ACTIVIDADES_SHEET = "ACTIVIDADES"
+ACTIVIDADES_COLUMNS = [
+    "actividad_id", "fecha_inicio", "fecha_fin", "hora_inicio", "hora_fin",
+    "proyecto_id", "tipo_actividad_id", "categoria_id", "actividad", "descripcion",
+    "tema", "resultado", "estado", "prioridad", "motor", "observaciones",
+]
+
 _VACIO_RE = re.compile(r"^\s*\(?\s*vac[ií]o\s*\)?\s*$", re.IGNORECASE)
 _WS_RE = re.compile(r"\s+")
 
@@ -382,3 +389,72 @@ def close_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descrip
         return False, ("No fue posible actualizar el hallazgo. Verifique que el archivo Excel "
                         "no esté abierto o bloqueado por otro usuario.")
     return True, "Hallazgo cerrado correctamente."
+
+
+def next_actividad_id(path: Path | str | None = None) -> str:
+    """Siguiente ID secuencial tipo 'A035' a partir del mayor existente."""
+    path = path if path is not None else EXCEL_PATH
+    ids = pd.read_excel(path, sheet_name=ACTIVIDADES_SHEET, usecols="A")["actividad_id"].dropna().astype(str)
+    nums = [int(m.group()) for i in ids if (m := re.search(r"\d+", i))]
+    return f"A{(max(nums) + 1) if nums else 1:03d}"
+
+
+def add_actividad(fecha_inicio: dt.date, hora_inicio: dt.time, hora_fin: dt.time,
+                   proyecto_id: str | None, tipo_actividad_id: str, categoria_id: str | None,
+                   actividad: str, descripcion: str, tema: str, resultado: str,
+                   estado: str, prioridad: str, motor: str | None = None,
+                   observaciones: str | None = None, fecha_fin: dt.date | None = None,
+                   path: Path | str | None = None) -> tuple[bool, str]:
+    """Agrega una fila nueva al final de ACTIVIDADES. No modifica ni borra
+    ninguna fila existente. fecha_fin, si no se da, se asume igual a
+    fecha_inicio (así están prácticamente todas las actividades existentes:
+    son de un solo día)."""
+    path = path if path is not None else EXCEL_PATH
+    fecha_fin = fecha_fin or fecha_inicio
+
+    try:
+        wb = openpyxl.load_workbook(path)
+    except PermissionError:
+        return False, ("No fue posible agregar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    except FileNotFoundError:
+        return False, "No se encontró el archivo seguimiento.xlsx."
+
+    if ACTIVIDADES_SHEET not in wb.sheetnames:
+        return False, "No se encontró la pestaña ACTIVIDADES en el archivo."
+
+    ws = wb[ACTIVIDADES_SHEET]
+    headers = [cell.value for cell in ws[1]]
+    try:
+        col_idx = {name: headers.index(name) + 1 for name in ACTIVIDADES_COLUMNS}
+    except ValueError:
+        return False, "La estructura de columnas de ACTIVIDADES cambió y no se pudo actualizar de forma segura."
+
+    ids_existentes = [str(ws.cell(row=r, column=col_idx["actividad_id"]).value or "")
+                       for r in range(2, ws.max_row + 1)]
+    nums = [int(m.group()) for i in ids_existentes if (m := re.search(r"\d+", i))]
+    new_id = f"A{(max(nums) + 1) if nums else 1:03d}"
+
+    fila = ws.max_row + 1
+    valores = {
+        "actividad_id": new_id, "fecha_inicio": fecha_inicio, "fecha_fin": fecha_fin,
+        "hora_inicio": hora_inicio, "hora_fin": hora_fin,
+        "proyecto_id": proyecto_id or None, "tipo_actividad_id": tipo_actividad_id,
+        "categoria_id": categoria_id or None, "actividad": actividad, "descripcion": descripcion,
+        "tema": tema, "resultado": resultado, "estado": estado, "prioridad": prioridad,
+        "motor": motor or None, "observaciones": observaciones or None,
+    }
+    for nombre, valor in valores.items():
+        celda = ws.cell(row=fila, column=col_idx[nombre])
+        celda.value = valor
+        if nombre in ("fecha_inicio", "fecha_fin"):
+            celda.number_format = "DD/MM/YYYY"
+        elif nombre in ("hora_inicio", "hora_fin"):
+            celda.number_format = "HH:MM"
+
+    try:
+        wb.save(path)
+    except PermissionError:
+        return False, ("No fue posible agregar la actividad. Verifique que el archivo Excel "
+                        "no esté abierto o bloqueado por otro usuario.")
+    return True, f"Actividad {new_id} agregada correctamente."

@@ -19,7 +19,7 @@ from flask import request
 
 import data as data_mod
 from components import badge_estado, badge_prioridad
-from data_store import df_from_store, df_to_store, hallazgos_to_store, issues_to_store
+from data_store import df_from_store, df_to_store, hallazgos_to_store, issues_to_store, lookups_to_store
 from theme import MESES_ES, fmt_rango_periodo
 
 # --------------------------------------------------------------------------
@@ -107,6 +107,7 @@ app.layout = html.Div(className="app-shell", children=[
     dcc.Store(id="store-data"),
     dcc.Store(id="store-issues"),
     dcc.Store(id="store-hallazgos"),
+    dcc.Store(id="store-lookups"),
     dcc.Store(id="store-selected-activity"),
     dcc.Interval(id="interval-refresh", interval=5 * 60 * 1000, n_intervals=0),
 
@@ -133,9 +134,10 @@ app.layout = html.Div(className="app-shell", children=[
 # Carga de datos (botón + refresco periódico)
 # --------------------------------------------------------------------------
 @app.callback(
-    Output("store-data", "data"),
+    Output("store-data", "data", allow_duplicate=True),
     Output("store-issues", "data"),
     Output("store-hallazgos", "data", allow_duplicate=True),
+    Output("store-lookups", "data"),
     Output("last-update-text", "children"),
     Output("sidebar-updated", "children"),
     Input("btn-refresh", "n_clicks"),
@@ -149,8 +151,9 @@ def refresh_data(_n_clicks, _n_intervals):
     stamp_text = datetime.now().strftime("%d/%m/%Y %H:%M")
     topbar_stamp = [html.I(className="bi bi-record-circle-fill"), f"Datos al {stamp_text}"]
     sidebar_stamp = [html.Div("ACTUALIZADO", className="sidebar-updated-label"), stamp_text]
+    lookups_json = lookups_to_store(loaded["proyectos"], loaded["tipos"], loaded["categorias"])
     return (df_to_store(df), issues_to_store(loaded["issues"]), hallazgos_to_store(hallazgos_df),
-            topbar_stamp, sidebar_stamp)
+            lookups_json, topbar_stamp, sidebar_stamp)
 
 
 # --------------------------------------------------------------------------
