@@ -116,6 +116,7 @@ layout = html.Div(className="page", children=[
     ]),
 
     dcc.Store(id="store-hallazgo-seleccionado"),
+    dcc.Store(id="hal-clicks-baseline"),
 
     dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("¿Desea cerrar este hallazgo?"), close_button=True),
@@ -322,10 +323,12 @@ def _campo_modal(label: str, value: str) -> html.Div:
     Output("hal-modal-body", "children"),
     Input("btn-cerrar-hallazgo", "n_clicks"),
     State("store-hallazgo-seleccionado", "data"),
+    State("hal-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_confirm_modal(n_clicks, seleccionado):
-    if not n_clicks or not seleccionado:
+def open_confirm_modal(n_clicks, seleccionado, baseline):
+    umbral = (baseline or {}).get("btn-cerrar-hallazgo", 0)
+    if not n_clicks or n_clicks <= umbral or not seleccionado:
         return dash.no_update, dash.no_update
     body = html.Div([
         html.P("Esta acción cambiará el estado del hallazgo a Cerrado y actualizará el archivo Excel.",
@@ -395,10 +398,12 @@ def update_hallazgo_form_proyecto_options(lookups_json):
     Output("hal-form-descripcion", "value"),
     Output("hal-form-estado", "value"),
     Input("btn-nuevo-hallazgo", "n_clicks"),
+    State("hal-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_nuevo_hallazgo(n_clicks):
-    if not n_clicks:
+def open_nuevo_hallazgo(n_clicks, baseline):
+    umbral = (baseline or {}).get("btn-nuevo-hallazgo", 0)
+    if not n_clicks or n_clicks <= umbral:
         return (dash.no_update,) * 8
     return True, None, None, "", "", "", "", "Abierto"
 
@@ -471,10 +476,12 @@ def guardar_nuevo_hallazgo(_n_clicks, proyecto, motor, script, funcion, descripc
     Output("hal-edit-form-estado", "value"),
     Input("btn-editar-hallazgo", "n_clicks"),
     State("store-hallazgo-seleccionado", "data"),
+    State("hal-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_editar_hallazgo(n_clicks, seleccionado):
-    if not n_clicks or not seleccionado:
+def open_editar_hallazgo(n_clicks, seleccionado, baseline):
+    umbral = (baseline or {}).get("btn-editar-hallazgo", 0)
+    if not n_clicks or n_clicks <= umbral or not seleccionado:
         return (dash.no_update,) * 8
     return (True, None, seleccionado["proyecto"], seleccionado["motor"], seleccionado["script"],
             seleccionado["funcion"], seleccionado["descripcion"], seleccionado["estado_actual"])
@@ -545,10 +552,12 @@ def guardar_editar_hallazgo(_n_clicks, seleccionado, proyecto, motor, script, fu
     Output("hal-eliminar-modal-body", "children"),
     Input("btn-eliminar-hallazgo", "n_clicks"),
     State("store-hallazgo-seleccionado", "data"),
+    State("hal-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_eliminar_hallazgo(n_clicks, seleccionado):
-    if not n_clicks or not seleccionado:
+def open_eliminar_hallazgo(n_clicks, seleccionado, baseline):
+    umbral = (baseline or {}).get("btn-eliminar-hallazgo", 0)
+    if not n_clicks or n_clicks <= umbral or not seleccionado:
         return dash.no_update, dash.no_update
     body = html.Div([
         html.P("Esta acción eliminará el hallazgo de forma permanente del archivo Excel y no se puede deshacer.",
@@ -603,10 +612,24 @@ def confirmar_eliminar_hallazgo(_n_clicks, seleccionado):
     Output("modal-editar-hallazgo", "is_open", allow_duplicate=True),
     Output("modal-eliminar-hallazgo", "is_open", allow_duplicate=True),
     Output("modal-cerrar-hallazgo", "is_open", allow_duplicate=True),
+    Output("hal-form-error", "children", allow_duplicate=True),
+    Output("hal-edit-form-error", "children", allow_duplicate=True),
+    Output("hal-tabla", "selected_rows"),
+    Output("hal-clicks-baseline", "data"),
     Input("url", "pathname"),
+    State("btn-nuevo-hallazgo", "n_clicks"),
+    State("btn-editar-hallazgo", "n_clicks"),
+    State("btn-eliminar-hallazgo", "n_clicks"),
+    State("btn-cerrar-hallazgo", "n_clicks"),
     prevent_initial_call=True,
 )
-def cerrar_modales_al_entrar(pathname):
+def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_cerrar):
     if pathname != "/hallazgos":
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
-    return False, False, False, False
+        return (dash.no_update,) * 8
+    baseline = {
+        "btn-nuevo-hallazgo": n_nuevo or 0,
+        "btn-editar-hallazgo": n_editar or 0,
+        "btn-eliminar-hallazgo": n_eliminar or 0,
+        "btn-cerrar-hallazgo": n_cerrar or 0,
+    }
+    return False, False, False, False, None, None, [], baseline

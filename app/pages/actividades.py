@@ -151,6 +151,7 @@ layout = html.Div(className="page", children=[
     act_toast,
     dcc.Store(id="store-actividad-seleccionada"),
     dcc.Store(id="store-actividad-form-mode"),
+    dcc.Store(id="act-clicks-baseline"),
 ])
 
 
@@ -256,10 +257,12 @@ def _campos_vacios():
     Output("act-form-modal-title", "children", allow_duplicate=True),
     Output("store-actividad-form-mode", "data", allow_duplicate=True),
     Input("btn-nueva-actividad", "n_clicks"),
+    State("act-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_nueva_actividad(n_clicks):
-    if not n_clicks:
+def open_nueva_actividad(n_clicks, baseline):
+    umbral = (baseline or {}).get("btn-nueva-actividad", 0)
+    if not n_clicks or n_clicks <= umbral:
         return (dash.no_update,) * 18
     return (True, None, *_campos_vacios(), "Nueva actividad", None)
 
@@ -286,11 +289,13 @@ def open_nueva_actividad(n_clicks):
     Input("btn-editar-actividad", "n_clicks"),
     State("store-actividad-seleccionada", "data"),
     State("store-data", "data"),
+    State("act-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_editar_actividad(n_clicks, actividad_id, store_json):
+def open_editar_actividad(n_clicks, actividad_id, store_json, baseline):
     vacio = (dash.no_update,) * 18
-    if not n_clicks or not actividad_id:
+    umbral = (baseline or {}).get("btn-editar-actividad", 0)
+    if not n_clicks or n_clicks <= umbral or not actividad_id:
         return vacio
 
     df = df_from_store(store_json)
@@ -412,10 +417,12 @@ def _campo_modal(label: str, value: str) -> html.Div:
     Input("btn-eliminar-actividad", "n_clicks"),
     State("store-actividad-seleccionada", "data"),
     State("store-data", "data"),
+    State("act-clicks-baseline", "data"),
     prevent_initial_call=True,
 )
-def open_eliminar_actividad(n_clicks, actividad_id, store_json):
-    if not n_clicks or not actividad_id:
+def open_eliminar_actividad(n_clicks, actividad_id, store_json, baseline):
+    umbral = (baseline or {}).get("btn-eliminar-actividad", 0)
+    if not n_clicks or n_clicks <= umbral or not actividad_id:
         return dash.no_update, dash.no_update
     df = df_from_store(store_json)
     fila = df[df["actividad_id"] == actividad_id]
@@ -473,10 +480,21 @@ def confirmar_eliminar_actividad(_n_clicks, actividad_id):
 @dash.callback(
     Output("modal-nueva-actividad", "is_open", allow_duplicate=True),
     Output("modal-eliminar-actividad", "is_open", allow_duplicate=True),
+    Output("act-form-error", "children", allow_duplicate=True),
+    Output("act-tabla", "selected_rows"),
+    Output("act-clicks-baseline", "data"),
     Input("url", "pathname"),
+    State("btn-nueva-actividad", "n_clicks"),
+    State("btn-editar-actividad", "n_clicks"),
+    State("btn-eliminar-actividad", "n_clicks"),
     prevent_initial_call=True,
 )
-def cerrar_modales_al_entrar(pathname):
+def cerrar_modales_al_entrar(pathname, n_nueva, n_editar, n_eliminar):
     if pathname != "/actividades":
-        return dash.no_update, dash.no_update
-    return False, False
+        return (dash.no_update,) * 5
+    baseline = {
+        "btn-nueva-actividad": n_nueva or 0,
+        "btn-editar-actividad": n_editar or 0,
+        "btn-eliminar-actividad": n_eliminar or 0,
+    }
+    return False, False, None, [], baseline
