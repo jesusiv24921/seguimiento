@@ -1,11 +1,26 @@
-"""Bloqueos y pendientes — qué está frenado y por qué, sin inventar soluciones."""
+"""Bloqueos y pendientes — qué está frenado y por qué, sin inventar soluciones.
+
+Los pendientes se muestran SIEMPRE, sin importar el filtro de fecha global:
+representan tareas abiertas que hay que hacer, no un evento que ya ocurrió en
+una fecha concreta, así que filtrarlos por "fecha_inicio" (su fecha límite)
+los hacía desaparecer apenas el rango seleccionado no incluía esa fecha. Un
+pendiente solo deja de listarse aquí cuando se cierra explícitamente con el
+botón "Cerrar pendiente" (requiere un comentario), lo que lo pasa a estado
+Completado con la fecha de cierre real — a partir de ahí es indistinguible de
+cualquier otra actividad completada.
+"""
 from __future__ import annotations
 
-import dash
-from dash import Input, Output, html
+import datetime as dt
 
+import dash
+import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import ALL, Input, Output, State, dcc, html
+
+import data as data_mod
 from components import badge_proyecto, chart_card, kpi_card, page_header, success_state
-from data_store import apply_all_filters, df_from_store
+from data_store import apply_all_filters, df_from_store, df_to_store
 
 dash.register_page(__name__, path="/bloqueos", name="Bloqueos y pendientes", title="Bloqueos y pendientes")
 
@@ -30,10 +45,33 @@ layout = html.Div(className="page", children=[
 
     chart_card([
         html.Div([html.I(className="bi bi-flag"), "Pendientes generados desde actividades"], className="section-title"),
-        html.Div("Tareas de seguimiento creadas con el botón \"Generar pendiente\" desde el detalle de una "
-                  "actividad (p.ej. una reunión).", className="section-caption"),
+        html.Div("Se muestran todos los pendientes abiertos, sin importar el filtro de fecha del periodo. "
+                  "Un pendiente solo desaparece de aquí cuando se cierra con un comentario.",
+                  className="section-caption"),
         html.Div(id="blq-lista-pendientes"),
     ]),
+
+    dcc.Store(id="store-pendiente-seleccionado"),
+    dcc.Store(id="blq-clicks-baseline"),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Cerrar pendiente"), close_button=True),
+        dbc.ModalBody([
+            html.Div(id="pnd-cierre-error"),
+            html.Div(id="pnd-cierre-origen", className="section-caption"),
+            html.Div([html.Div([html.I(className="bi bi-text-paragraph"), "Comentario de cierre"],
+                                  className="filter-label"),
+                       dbc.Textarea(id="pnd-cierre-comentario",
+                                     placeholder="Qué se hizo / cómo quedó resuelto este pendiente.",
+                                     style={"height": "90px"})], className="mb-2"),
+            html.Div(id="pnd-cierre-fecha-info", className="section-caption"),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-cierre-pendiente", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2-circle"), "Confirmar cierre"],
+                        id="btn-confirmar-cierre-pendiente", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-cerrar-pendiente", is_open=False),
 ])
 
 
@@ -55,7 +93,8 @@ def update_bloqueos(store_json, start_date, end_date):
         return "0", "kpi-icon tone-good", "0", "0", "0", "kpi-icon tone-good", vacio, vacio
 
     bloqueados = apply_all_filters(df[df["estado"] == "Bloqueado"], start_date, end_date)
-    pendientes = apply_all_filters(df[df["estado"] == "Pendiente"], start_date, end_date)
+    # Los pendientes NO se filtran por fecha: deben verse siempre hasta que se cierren.
+    pendientes = df[df["estado"] == "Pendiente"]
 
     total = len(bloqueados)
     n_sentinel = int(bloqueados["proyecto"].eq("Sentinel Alerts").sum())
@@ -81,10 +120,10 @@ def update_bloqueos(store_json, start_date, end_date):
         lista = html.Div(cards, className="blocker-list")
 
     if pendientes.empty:
-        lista_pendientes = success_state("No hay pendientes generados en el periodo seleccionado.")
+        lista_pendientes = success_state("No hay pendientes abiertos.")
     else:
         cards_p = []
-        for _, r in pendientes.sort_values("fecha_inicio", ascending=False).iterrows():
+        for _, r in pendientes.sort_values("fecha_inicio", ascending=True).iterrows():
             cards_p.append(html.Div(className="pending-card", children=[
                 html.Div([html.I(className="bi bi-flag-fill"), badge_proyecto(r["proyecto"])],
                           className="blocker-card-head"),
@@ -93,8 +132,125 @@ def update_bloqueos(store_json, start_date, end_date):
                 html.Div(f"Fecha límite: {r['fecha_inicio'].strftime('%d/%m/%Y')} · Prioridad: {r['prioridad']}",
                           className="blocker-card-meta"),
                 html.Div(r["observaciones"], className="blocker-card-meta") if r["observaciones"] else None,
+                html.Div(className="pending-card-actions", children=[
+                    dbc.Button([html.I(className="bi bi-check2-circle"), "Cerrar pendiente"],
+                                id={"type": "btn-cerrar-pendiente", "index": r["actividad_id"]},
+                                className="btn-refresh", size="sm", n_clicks=0),
+                ]),
             ]))
         lista_pendientes = html.Div(cards_p, className="blocker-list")
 
     return (str(total), icon_tone, str(n_sentinel), str(n_newopps),
             str(n_pendientes), pendientes_icon_tone, lista, lista_pendientes)
+
+
+# --------------------------------------------------------------------------
+# Reinicia la línea base de clics al entrar a la página (mismo patrón que
+# Hallazgos/Actividades: evita que un clic de una visita anterior en la
+# misma sesión reabra el modal de cierre solo).
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-cerrar-pendiente", "is_open", allow_duplicate=True),
+    Output("blq-clicks-baseline", "data"),
+    Input("url", "pathname"),
+    State("btn-confirmar-cierre-pendiente", "n_clicks"),
+    prevent_initial_call=True,
+)
+def resetear_al_entrar(pathname, n_confirmar):
+    if pathname != "/bloqueos":
+        return dash.no_update, dash.no_update
+    return False, {"btn-confirmar-cierre-pendiente": n_confirmar or 0}
+
+
+# --------------------------------------------------------------------------
+# Abrir el modal de cierre para un pendiente específico (botón dinámico,
+# uno por tarjeta, identificado por su actividad_id).
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-cerrar-pendiente", "is_open"),
+    Output("store-pendiente-seleccionado", "data"),
+    Output("pnd-cierre-error", "children"),
+    Output("pnd-cierre-origen", "children"),
+    Output("pnd-cierre-comentario", "value"),
+    Output("pnd-cierre-fecha-info", "children"),
+    Input({"type": "btn-cerrar-pendiente", "index": ALL}, "n_clicks"),
+    State("store-data", "data"),
+    prevent_initial_call=True,
+)
+def abrir_cerrar_pendiente(n_clicks_list, store_json):
+    if not n_clicks_list or not any(n_clicks_list):
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+    triggered = dash.ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+    actividad_id = triggered["index"]
+    df = df_from_store(store_json)
+    fila = df[df["actividad_id"] == actividad_id]
+    if fila.empty:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    r = fila.iloc[0]
+
+    origen = f'Pendiente: "{r["actividad"]}" ({r["proyecto"]}) · Fecha límite: {r["fecha_inicio"].strftime("%d/%m/%Y")}'
+    fecha_info = f'Se cerrará con fecha de hoy, {dt.date.today().strftime("%d/%m/%Y")}.'
+    return True, actividad_id, None, origen, "", fecha_info
+
+
+@dash.callback(
+    Output("modal-cerrar-pendiente", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-cierre-pendiente", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancelar_cierre_pendiente(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("store-data", "data", allow_duplicate=True),
+    Output("modal-cerrar-pendiente", "is_open", allow_duplicate=True),
+    Output("pnd-cierre-error", "children", allow_duplicate=True),
+    Input("btn-confirmar-cierre-pendiente", "n_clicks"),
+    State("store-pendiente-seleccionado", "data"),
+    State("store-data", "data"),
+    State("pnd-cierre-comentario", "value"),
+    State("blq-clicks-baseline", "data"),
+    prevent_initial_call=True,
+)
+def confirmar_cierre_pendiente(n_clicks, actividad_id, store_json, comentario, baseline):
+    umbral = (baseline or {}).get("btn-confirmar-cierre-pendiente", 0)
+
+    def error(msg):
+        return dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"})
+
+    if not n_clicks or n_clicks <= umbral:
+        return dash.no_update, dash.no_update, dash.no_update
+    if not actividad_id:
+        return error("No hay ningún pendiente seleccionado.")
+    if not comentario or not comentario.strip():
+        return error("Escribe un comentario de cierre.")
+
+    df = df_from_store(store_json)
+    fila = df[df["actividad_id"] == actividad_id]
+    if fila.empty:
+        return error("No se encontró el pendiente seleccionado (los datos pudieron cambiar).")
+    r = fila.iloc[0]
+
+    def _clean(v):
+        return None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+
+    ok, msg = data_mod.update_actividad(
+        actividad_id=actividad_id,
+        fecha_inicio=r["fecha_inicio"].date(), fecha_fin=dt.date.today(),
+        hora_inicio=r["inicio_dt"].time() if pd.notna(r["inicio_dt"]) else dt.time(0, 0),
+        hora_fin=r["fin_dt"].time() if pd.notna(r["fin_dt"]) else dt.time(0, 0),
+        proyecto_id=_clean(r.get("proyecto_id")), tipo_actividad_id=_clean(r.get("tipo_actividad_id")),
+        categoria_id=_clean(r.get("categoria_id")), actividad=r["actividad"], descripcion=r["descripcion"],
+        tema=r["tema"], resultado=comentario.strip(), estado="Completado", prioridad=r["prioridad"],
+        motor=_clean(r.get("motor")), observaciones=_clean(r.get("observaciones")),
+    )
+    if not ok:
+        return error(msg)
+
+    nuevo_df = data_mod.load_data()["actividades"]
+    return df_to_store(nuevo_df), False, None

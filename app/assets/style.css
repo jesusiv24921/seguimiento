@@ -824,6 +824,7 @@ body {
 .pending-card .blocker-card-head { color: var(--warning); }
 .pending-card .blocker-card-title { font-weight: 700; font-size: 0.92rem; color: var(--ink-primary); margin-bottom: 0.3rem; }
 .pending-card .blocker-card-body { font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.5; margin-bottom: 0.2rem; }
+.pending-card-actions { margin-top: 0.6rem; }
 
 /* ---------------------------------------------------------------------
    Estados vacíos / de éxito
