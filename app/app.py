@@ -434,7 +434,10 @@ def cancel_generar_pendiente(_n_clicks):
     State("pnd-form-fecha-limite", "date"),
     prevent_initial_call=True,
 )
-def guardar_pendiente(_n_clicks, actividad_id, store_json, titulo, descripcion, prioridad, fecha_limite):
+def guardar_pendiente(n_clicks, actividad_id, store_json, titulo, descripcion, prioridad, fecha_limite):
+    if not n_clicks:
+        return (dash.no_update,) * 6
+
     def error(msg):
         return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
                 dash.no_update, dash.no_update, dash.no_update)

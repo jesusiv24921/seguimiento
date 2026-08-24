@@ -352,9 +352,17 @@ def cancel_nueva_actividad(_n_clicks):
     State("act-form-observaciones", "value"),
     prevent_initial_call=True,
 )
-def guardar_nueva_actividad(_n_clicks, modo_edicion, fecha, hora_inicio_txt, hora_fin_txt, proyecto_id, tipo_id,
+def guardar_nueva_actividad(n_clicks, modo_edicion, fecha, hora_inicio_txt, hora_fin_txt, proyecto_id, tipo_id,
                              categoria_id, titulo, tema, descripcion, resultado, estado, prioridad,
                              motor, observaciones):
+    if not n_clicks:
+        # Dash puede invocar callbacks con prevent_initial_call=True al entrar a una
+        # página en apps multi-página (github.com/plotly/dash/issues/1513); sin esta
+        # guarda, esa invocación fantasma con campos vacíos cae en la primera
+        # validación de error() y esta, para dejar corregir el formulario, pone
+        # is_open=True — abriendo el modal solo, con un error, sin que nadie lo pida.
+        return (dash.no_update,) * 6
+
     def error(msg):
         return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
                 dash.no_update, dash.no_update, dash.no_update)
@@ -460,7 +468,9 @@ def cancel_eliminar_actividad(_n_clicks):
     State("store-actividad-seleccionada", "data"),
     prevent_initial_call=True,
 )
-def confirmar_eliminar_actividad(_n_clicks, actividad_id):
+def confirmar_eliminar_actividad(n_clicks, actividad_id):
+    if not n_clicks:
+        return (dash.no_update,) * 5
     if not actividad_id:
         return dash.no_update, False, "No hay ninguna actividad seleccionada.", "danger", True
 

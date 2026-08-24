@@ -360,7 +360,9 @@ def cancel_close(_n_clicks):
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
 )
-def confirm_close(_n_clicks, seleccionado):
+def confirm_close(n_clicks, seleccionado):
+    if not n_clicks:
+        return (dash.no_update,) * 5
     if not seleccionado:
         return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
 
@@ -433,7 +435,13 @@ def cancel_nuevo_hallazgo(_n_clicks):
     State("hal-form-estado", "value"),
     prevent_initial_call=True,
 )
-def guardar_nuevo_hallazgo(_n_clicks, proyecto, motor, script, funcion, descripcion, estado):
+def guardar_nuevo_hallazgo(n_clicks, proyecto, motor, script, funcion, descripcion, estado):
+    if not n_clicks:
+        # Ver comentario equivalente en actividades.py: dash/#1513 puede invocar este
+        # callback al entrar a la página con campos vacíos, y sin esta guarda su
+        # error() dejaría is_open=True, abriendo el modal solo.
+        return (dash.no_update,) * 6
+
     def error(msg):
         return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
                 dash.no_update, dash.no_update, dash.no_update)
@@ -513,7 +521,10 @@ def cancel_editar_hallazgo(_n_clicks):
     State("hal-edit-form-estado", "value"),
     prevent_initial_call=True,
 )
-def guardar_editar_hallazgo(_n_clicks, seleccionado, proyecto, motor, script, funcion, descripcion, estado):
+def guardar_editar_hallazgo(n_clicks, seleccionado, proyecto, motor, script, funcion, descripcion, estado):
+    if not n_clicks:
+        return (dash.no_update,) * 6
+
     def error(msg):
         return (dash.no_update, True, html.Div(msg, className="section-caption", style={"color": "#a52323"}),
                 dash.no_update, dash.no_update, dash.no_update)
@@ -590,7 +601,9 @@ def cancel_eliminar_hallazgo(_n_clicks):
     State("store-hallazgo-seleccionado", "data"),
     prevent_initial_call=True,
 )
-def confirmar_eliminar_hallazgo(_n_clicks, seleccionado):
+def confirmar_eliminar_hallazgo(n_clicks, seleccionado):
+    if not n_clicks:
+        return (dash.no_update,) * 5
     if not seleccionado:
         return dash.no_update, False, "No hay ningún hallazgo seleccionado.", "danger", True
 
