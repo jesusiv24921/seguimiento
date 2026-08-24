@@ -827,6 +827,65 @@ body {
 .pending-card-actions { margin-top: 0.6rem; }
 
 /* ---------------------------------------------------------------------
+   Tablas responsive: en pantallas angostas/verticales, dash_table se
+   reemplaza por una lista de tarjetas (más legible que hacer scroll
+   horizontal en una tabla ancha con el dedo). Ambas vistas comparten los
+   mismos datos y la misma selección (Editar/Eliminar/Cerrar) — la tarjeta
+   solo escribe en el mismo Store/prop que ya lee la tabla.
+--------------------------------------------------------------------- */
+.table-mobile-only { display: none; }
+
+@media (max-width: 640px) {
+    .table-desktop-only { display: none; }
+    .table-mobile-only { display: flex; flex-direction: column; gap: 0.7rem; margin-top: 0.4rem; }
+}
+
+.hal-card {
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-card);
+    padding: 0.9rem 1rem;
+    box-shadow: var(--shadow-card);
+}
+.hal-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.4rem;
+}
+.hal-card-motor { font-size: 0.78rem; font-weight: 700; color: var(--ink-secondary); }
+.hal-card-desc {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--ink-primary);
+    line-height: 1.4;
+    margin-bottom: 0.55rem;
+}
+.hal-card-body-clickable { cursor: pointer; }
+.hal-card-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 0.8rem;
+    margin-bottom: 0.7rem;
+}
+.hal-card-meta-label {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-muted);
+}
+.hal-card-meta-value {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--ink-secondary);
+    overflow-wrap: break-word;
+}
+.btn-sm-card { font-size: 0.78rem !important; padding: 0.35rem 0.75rem !important; }
+
+/* ---------------------------------------------------------------------
    Estados vacíos / de éxito
 --------------------------------------------------------------------- */
 .empty-state {

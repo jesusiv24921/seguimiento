@@ -12,7 +12,7 @@ import datetime as dt
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, dash_table, dcc, html
+from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import charts
 import data as data_mod
@@ -85,43 +85,46 @@ layout = html.Div(className="page", children=[
             dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo hallazgo"],
                         id="btn-nuevo-hallazgo", className="btn-refresh ms-auto", n_clicks=0),
         ]),
-        dash_table.DataTable(
-            id="hal-tabla",
-            columns=[
-                {"name": "Estado", "id": "Estado"},
-                {"name": "Fecha hallazgo", "id": "fecha_hallazgo_txt"},
-                {"name": "Fecha cierre", "id": "fecha_cierre_txt"},
-                {"name": "Motor", "id": "Motor"},
-                {"name": "Script", "id": "Script"},
-                {"name": "Función", "id": "Función"},
-                {"name": "Descripción", "id": "Descripción"},
-            ],
-            row_selectable="multi",
-            page_size=12,
-            sort_action="native",
-            filter_action="native",
-            export_format="csv",
-            export_headers="display",
-            style_as_list_view=True,
-            style_table={"overflowX": "auto"},
-            style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
-                        "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
-                        "height": "auto", "border": "none"},
-            style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
-                          "border": "none", "borderBottom": f"1px solid {GRID}"},
-            style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
-            style_data_conditional=(
-                [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
-                + [{"if": {"filter_query": f'{{Estado}} = "{k}"', "column_id": "Estado"},
-                    "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"}
-                   for k, v in HALLAZGO_ESTADO_PILL.items()]
+        html.Div(className="table-desktop-only", children=[
+            dash_table.DataTable(
+                id="hal-tabla",
+                columns=[
+                    {"name": "Estado", "id": "Estado"},
+                    {"name": "Fecha hallazgo", "id": "fecha_hallazgo_txt"},
+                    {"name": "Fecha cierre", "id": "fecha_cierre_txt"},
+                    {"name": "Motor", "id": "Motor"},
+                    {"name": "Script", "id": "Script"},
+                    {"name": "Función", "id": "Función"},
+                    {"name": "Descripción", "id": "Descripción"},
+                ],
+                row_selectable="multi",
+                page_size=12,
+                sort_action="native",
+                filter_action="native",
+                export_format="csv",
+                export_headers="display",
+                style_as_list_view=True,
+                style_table={"overflowX": "auto"},
+                style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
+                            "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
+                            "height": "auto", "border": "none"},
+                style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
+                              "border": "none", "borderBottom": f"1px solid {GRID}"},
+                style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
+                style_data_conditional=(
+                    [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
+                    + [{"if": {"filter_query": f'{{Estado}} = "{k}"', "column_id": "Estado"},
+                        "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"}
+                       for k, v in HALLAZGO_ESTADO_PILL.items()]
+                ),
+                style_cell_conditional=[{"if": {"column_id": "Motor"}, "minWidth": "200px"},
+                                         {"if": {"column_id": "Descripción"}, "minWidth": "340px"},
+                                         {"if": {"column_id": "Estado"}, "maxWidth": "110px"},
+                                         {"if": {"column_id": "fecha_hallazgo_txt"}, "maxWidth": "110px"},
+                                         {"if": {"column_id": "fecha_cierre_txt"}, "maxWidth": "110px"}],
             ),
-            style_cell_conditional=[{"if": {"column_id": "Motor"}, "minWidth": "200px"},
-                                     {"if": {"column_id": "Descripción"}, "minWidth": "340px"},
-                                     {"if": {"column_id": "Estado"}, "maxWidth": "110px"},
-                                     {"if": {"column_id": "fecha_hallazgo_txt"}, "maxWidth": "110px"},
-                                     {"if": {"column_id": "fecha_cierre_txt"}, "maxWidth": "110px"}],
-        ),
+        ]),
+        html.Div(id="hal-tabla-cards", className="table-mobile-only"),
     ]),
 
     dcc.Store(id="store-hallazgo-seleccionado"),
@@ -252,6 +255,37 @@ def update_hallazgos_filter_options(store_json):
     return opts("Motor"), opts("Estado"), opts("Script"), opts("Función")
 
 
+def _hallazgo_card(idx: int, row: dict) -> html.Div:
+    """Tarjeta con el mismo contenido que una fila de hal-tabla, para pantallas
+    angostas/verticales. El botón "Seleccionar" escribe directo en
+    hal-tabla.selected_rows (con el mismo índice de esta fila), así que
+    reutiliza sin duplicar toda la lógica de selección/edición/cierre que ya
+    lee ese mismo prop."""
+    pill = HALLAZGO_ESTADO_PILL.get(row["Estado"], {"bg": "#eee", "fg": "#333"})
+    return html.Div(className="hal-card", children=[
+        html.Div(className="hal-card-head", children=[
+            html.Span(row["Estado"], className="status-pill",
+                       style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
+            html.Span(row["Motor"], className="hal-card-motor"),
+        ]),
+        html.Div(row["Descripción"], className="hal-card-desc"),
+        html.Div(className="hal-card-meta-grid", children=[
+            html.Div([html.Span("Proyecto", className="hal-card-meta-label"),
+                       html.Span(row["Proyecto"], className="hal-card-meta-value")]),
+            html.Div([html.Span("Script", className="hal-card-meta-label"),
+                       html.Span(row["Script"], className="hal-card-meta-value")]),
+            html.Div([html.Span("Función", className="hal-card-meta-label"),
+                       html.Span(row["Función"], className="hal-card-meta-value")]),
+            html.Div([html.Span("Fecha hallazgo", className="hal-card-meta-label"),
+                       html.Span(row["fecha_hallazgo_txt"], className="hal-card-meta-value")]),
+            html.Div([html.Span("Fecha cierre", className="hal-card-meta-label"),
+                       html.Span(row["fecha_cierre_txt"], className="hal-card-meta-value")]),
+        ]),
+        dbc.Button("Seleccionar", id={"type": "hal-card-select", "index": idx},
+                    className="btn-refresh btn-sm-card", size="sm", n_clicks=0),
+    ])
+
+
 # --------------------------------------------------------------------------
 # KPIs + gráficos + tabla
 # --------------------------------------------------------------------------
@@ -264,6 +298,7 @@ def update_hallazgos_filter_options(store_json):
     Output("hal-g-estado", "figure"),
     Output("hal-g-motor", "figure"),
     Output("hal-tabla", "data"),
+    Output("hal-tabla-cards", "children"),
     Input("store-hallazgos", "data"),
     Input("hal-f-motor", "value"),
     Input("hal-f-estado", "value"),
@@ -274,7 +309,7 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
     df = hallazgos_from_store(store_json)
     if df.empty:
         empty = charts.empty_figure("Sin datos disponibles en la pestaña HALLAZGOS.")
-        return "0", "0", "kpi-icon tone-good", "0", "0", "0.0%", empty, empty, []
+        return "0", "0", "kpi-icon tone-good", "0", "0", "0.0%", empty, empty, [], []
 
     filtered = df
     if motores:
@@ -312,8 +347,29 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
         if pd.isna(fila["fecha_cierre_iso"]):
             fila["fecha_cierre_iso"] = None
 
+    cards = [_hallazgo_card(i, fila) for i, fila in enumerate(tabla_data)]
+
     return (str(total), str(abiertos), abiertos_icon, str(revision), str(cerrados),
-            f"{pct_cierre:.1f}%", fig_estado, fig_motor, tabla_data)
+            f"{pct_cierre:.1f}%", fig_estado, fig_motor, tabla_data, cards)
+
+
+# --------------------------------------------------------------------------
+# Botón "Seleccionar" de una tarjeta (vista móvil): escribe en
+# hal-tabla.selected_rows, así que dispara update_hallazgo_selection de
+# abajo exactamente igual que marcar la casilla de la tabla.
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("hal-tabla", "selected_rows", allow_duplicate=True),
+    Input({"type": "hal-card-select", "index": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def seleccionar_hallazgo_desde_card(n_clicks_list):
+    if not n_clicks_list or not any(n_clicks_list):
+        return dash.no_update
+    triggered = dash.ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        return dash.no_update
+    return [triggered["index"]]
 
 
 # --------------------------------------------------------------------------
@@ -693,7 +749,7 @@ def confirmar_eliminar_hallazgo(n_clicks, seleccionado):
     Output("modal-cerrar-hallazgo", "is_open", allow_duplicate=True),
     Output("hal-form-error", "children", allow_duplicate=True),
     Output("hal-edit-form-error", "children", allow_duplicate=True),
-    Output("hal-tabla", "selected_rows"),
+    Output("hal-tabla", "selected_rows", allow_duplicate=True),
     Output("hal-clicks-baseline", "data"),
     Input("url", "pathname"),
     State("btn-nuevo-hallazgo", "n_clicks"),

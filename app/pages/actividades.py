@@ -7,10 +7,10 @@ import re
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, dash_table, dcc, html
+from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import data as data_mod
-from components import chart_card, page_header
+from components import badge_estado, badge_prioridad, chart_card, page_header
 from data_store import apply_all_filters, df_from_store, df_to_store, lookups_from_store
 from theme import ESTADO_PILL, GRID, INK_MUTED, INK_PRIMARY, PRIORIDAD_PILL
 
@@ -107,44 +107,47 @@ layout = html.Div(className="page", children=[
         html.Div("Selecciona una fila con la casilla para editarla o eliminarla, o haz clic en cualquier celda "
                   "para ver el detalle completo. Ordena, filtra por columna o exporta a CSV con los controles "
                   "de la tabla.", className="section-caption"),
-        dash_table.DataTable(
-            id="act-tabla",
-            row_selectable="single",
-            columns=[
-                {"name": "ID", "id": "actividad_id"},
-                {"name": "Fecha", "id": "fecha_txt"},
-                {"name": "Horario", "id": "horario_txt"},
-                {"name": "Duración", "id": "horas_txt"},
-                {"name": "Proyecto", "id": "proyecto"},
-                {"name": "Actividad", "id": "actividad"},
-                {"name": "Tema", "id": "tema"},
-                {"name": "Estado", "id": "estado"},
-                {"name": "Prioridad", "id": "prioridad"},
-            ],
-            page_size=15,
-            sort_action="native",
-            filter_action="native",
-            export_format="csv",
-            export_headers="display",
-            style_as_list_view=True,
-            style_table={"overflowX": "auto"},
-            style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
-                        "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
-                        "height": "auto", "border": "none", "cursor": "pointer"},
-            style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
-                          "border": "none", "borderBottom": f"1px solid {GRID}"},
-            style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
-            style_data_conditional=(
-                [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
-                + [{"if": {"filter_query": f'{{estado}} = "{k}"', "column_id": "estado"},
-                    "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"} for k, v in ESTADO_PILL.items()]
-                + [{"if": {"filter_query": f'{{prioridad}} = "{k}"', "column_id": "prioridad"},
-                    "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"} for k, v in PRIORIDAD_PILL.items()]
+        html.Div(className="table-desktop-only", children=[
+            dash_table.DataTable(
+                id="act-tabla",
+                row_selectable="single",
+                columns=[
+                    {"name": "ID", "id": "actividad_id"},
+                    {"name": "Fecha", "id": "fecha_txt"},
+                    {"name": "Horario", "id": "horario_txt"},
+                    {"name": "Duración", "id": "horas_txt"},
+                    {"name": "Proyecto", "id": "proyecto"},
+                    {"name": "Actividad", "id": "actividad"},
+                    {"name": "Tema", "id": "tema"},
+                    {"name": "Estado", "id": "estado"},
+                    {"name": "Prioridad", "id": "prioridad"},
+                ],
+                page_size=15,
+                sort_action="native",
+                filter_action="native",
+                export_format="csv",
+                export_headers="display",
+                style_as_list_view=True,
+                style_table={"overflowX": "auto"},
+                style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
+                            "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
+                            "height": "auto", "border": "none", "cursor": "pointer"},
+                style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
+                              "border": "none", "borderBottom": f"1px solid {GRID}"},
+                style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
+                style_data_conditional=(
+                    [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
+                    + [{"if": {"filter_query": f'{{estado}} = "{k}"', "column_id": "estado"},
+                        "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"} for k, v in ESTADO_PILL.items()]
+                    + [{"if": {"filter_query": f'{{prioridad}} = "{k}"', "column_id": "prioridad"},
+                        "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"} for k, v in PRIORIDAD_PILL.items()]
+                ),
+                style_cell_conditional=[{"if": {"column_id": "actividad"}, "minWidth": "200px"},
+                                         {"if": {"column_id": "tema"}, "minWidth": "180px"},
+                                         {"if": {"column_id": "actividad_id"}, "maxWidth": "60px"}],
             ),
-            style_cell_conditional=[{"if": {"column_id": "actividad"}, "minWidth": "200px"},
-                                     {"if": {"column_id": "tema"}, "minWidth": "180px"},
-                                     {"if": {"column_id": "actividad_id"}, "maxWidth": "60px"}],
-        ),
+        ]),
+        html.Div(id="act-tabla-cards", className="table-mobile-only"),
     ]),
     nueva_actividad_modal,
     eliminar_actividad_modal,
@@ -155,8 +158,40 @@ layout = html.Div(className="page", children=[
 ])
 
 
+def _actividad_card(idx: int, row: dict) -> html.Div:
+    """Tarjeta con el mismo contenido que una fila de act-tabla, para pantallas
+    angostas/verticales. Tocar el cuerpo abre el detalle (igual que hacer clic
+    en una celda de la tabla); el botón "Seleccionar" escribe en
+    act-tabla.selected_rows para editar/eliminar, igual que la casilla de la
+    tabla — así no se duplica ninguna lógica de selección."""
+    return html.Div(className="hal-card", children=[
+        html.Div(className="hal-card-body-clickable",
+                  id={"type": "act-card-view", "index": idx}, n_clicks=0, children=[
+            html.Div(className="hal-card-head", children=[
+                badge_estado(row["estado"]), badge_prioridad(row["prioridad"]),
+            ]),
+            html.Div(row["actividad"], className="hal-card-desc"),
+            html.Div(className="hal-card-meta-grid", children=[
+                html.Div([html.Span("ID", className="hal-card-meta-label"),
+                           html.Span(row["actividad_id"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Fecha", className="hal-card-meta-label"),
+                           html.Span(row["fecha_txt"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Horario", className="hal-card-meta-label"),
+                           html.Span(row["horario_txt"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Proyecto", className="hal-card-meta-label"),
+                           html.Span(row["proyecto"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Tema", className="hal-card-meta-label"),
+                           html.Span(row["tema"], className="hal-card-meta-value")]),
+            ]),
+        ]),
+        dbc.Button("Seleccionar", id={"type": "act-card-select", "index": idx},
+                    className="btn-refresh btn-sm-card", size="sm", n_clicks=0),
+    ])
+
+
 @dash.callback(
     Output("act-tabla", "data"),
+    Output("act-tabla-cards", "children"),
     Input("store-data", "data"),
     Input("f-fechas", "start_date"),
     Input("f-fechas", "end_date"),
@@ -164,7 +199,7 @@ layout = html.Div(className="page", children=[
 def update_actividades(store_json, start_date, end_date):
     df = df_from_store(store_json)
     if df.empty:
-        return []
+        return [], []
 
     filtered = apply_all_filters(df, start_date, end_date)
 
@@ -177,7 +212,9 @@ def update_actividades(store_json, start_date, end_date):
 
     cols = ["id", "actividad_id", "fecha_txt", "horario_txt", "horas_txt", "proyecto",
             "actividad", "tema", "estado", "prioridad"]
-    return tabla[cols].to_dict("records")
+    tabla_data = tabla[cols].to_dict("records")
+    cards = [_actividad_card(i, fila) for i, fila in enumerate(tabla_data)]
+    return tabla_data, cards
 
 
 @dash.callback(
@@ -189,6 +226,43 @@ def select_activity_from_table(active_cell):
     if not active_cell:
         return dash.no_update
     return active_cell.get("row_id")
+
+
+# --------------------------------------------------------------------------
+# Vista móvil (tarjetas): tocar el cuerpo abre el detalle, igual que un clic
+# en la tabla; el botón "Seleccionar" marca la fila en act-tabla.selected_rows
+# para poder editarla/eliminarla — ambos reutilizan la lógica ya existente.
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("store-selected-activity", "data", allow_duplicate=True),
+    Input({"type": "act-card-view", "index": ALL}, "n_clicks"),
+    State("act-tabla", "data"),
+    prevent_initial_call=True,
+)
+def ver_detalle_actividad_desde_card(n_clicks_list, table_data):
+    if not n_clicks_list or not any(n_clicks_list):
+        return dash.no_update
+    triggered = dash.ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        return dash.no_update
+    idx = triggered["index"]
+    if not table_data or idx >= len(table_data):
+        return dash.no_update
+    return table_data[idx]["actividad_id"]
+
+
+@dash.callback(
+    Output("act-tabla", "selected_rows", allow_duplicate=True),
+    Input({"type": "act-card-select", "index": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def seleccionar_actividad_desde_card(n_clicks_list):
+    if not n_clicks_list or not any(n_clicks_list):
+        return dash.no_update
+    triggered = dash.ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        return dash.no_update
+    return [triggered["index"]]
 
 
 @dash.callback(
@@ -491,7 +565,7 @@ def confirmar_eliminar_actividad(n_clicks, actividad_id):
     Output("modal-nueva-actividad", "is_open", allow_duplicate=True),
     Output("modal-eliminar-actividad", "is_open", allow_duplicate=True),
     Output("act-form-error", "children", allow_duplicate=True),
-    Output("act-tabla", "selected_rows"),
+    Output("act-tabla", "selected_rows", allow_duplicate=True),
     Output("act-clicks-baseline", "data"),
     Input("url", "pathname"),
     State("btn-nueva-actividad", "n_clicks"),
