@@ -100,7 +100,7 @@ def hallazgos_from_store(json_str: str | None) -> pd.DataFrame:
 KNOWLEDGE_COLUMNS = ["conocimiento_id", "titulo", "descripcion_breve", "contenido", "categoria",
                      "estado", "ambito", "proyectos", "etiquetas", "fuente",
                      "actividades_relacionadas", "hallazgos_relacionados", "conceptos", "objetivo_estudio",
-                     "fecha_creacion", "fecha_actualizacion"]
+                     "leccion_aprendida", "fecha_creacion", "fecha_actualizacion"]
 KNOWLEDGE_DATE_COLS = ["fecha_creacion", "fecha_actualizacion"]
 
 

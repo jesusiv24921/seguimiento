@@ -23,7 +23,7 @@ KNOWLEDGE_COLUMNS = [
     "conocimiento_id", "titulo", "descripcion_breve", "contenido", "categoria",
     "estado", "ambito", "proyectos", "etiquetas", "fuente",
     "actividades_relacionadas", "hallazgos_relacionados", "conceptos", "objetivo_estudio",
-    "fecha_creacion", "fecha_actualizacion",
+    "leccion_aprendida", "fecha_creacion", "fecha_actualizacion",
 ]
 KNOWLEDGE_DATE_COLS = ["fecha_creacion", "fecha_actualizacion"]
 
@@ -156,7 +156,7 @@ def add_knowledge(titulo: str, descripcion_breve: str, contenido: str, categoria
                    estado: str, ambito: str, proyectos: str | None, etiquetas: str | None,
                    fuente: str | None = None, actividades_relacionadas: str | None = None,
                    hallazgos_relacionados: str | None = None, conceptos: str | None = None,
-                   objetivo_estudio: str | None = None,
+                   objetivo_estudio: str | None = None, leccion_aprendida: str | None = None,
                    path: Path | str | None = None) -> tuple[bool, str, str | None]:
     """Agrega una entrada nueva al final de CONOCIMIENTO. Devuelve también el
     ID generado (K0xx) para poder, por ejemplo, subir un archivo adjunto en el
@@ -180,6 +180,7 @@ def add_knowledge(titulo: str, descripcion_breve: str, contenido: str, categoria
         "actividades_relacionadas": actividades_relacionadas or None,
         "hallazgos_relacionados": hallazgos_relacionados or None,
         "conceptos": conceptos or None, "objetivo_estudio": objetivo_estudio or None,
+        "leccion_aprendida": leccion_aprendida or None,
         "fecha_creacion": ahora, "fecha_actualizacion": ahora,
     }
     for nombre, valor in valores.items():
@@ -201,7 +202,7 @@ def update_knowledge(conocimiento_id: str, titulo: str, descripcion_breve: str, 
                       etiquetas: str | None, fuente: str | None = None,
                       actividades_relacionadas: str | None = None,
                       hallazgos_relacionados: str | None = None, conceptos: str | None = None,
-                      objetivo_estudio: str | None = None,
+                      objetivo_estudio: str | None = None, leccion_aprendida: str | None = None,
                       path: Path | str | None = None) -> tuple[bool, str]:
     path = path if path is not None else data_mod.EXCEL_PATH
     wb, ws, col_idx, error = _abrir_para_escritura(path, "actualizar el conocimiento")
@@ -223,6 +224,7 @@ def update_knowledge(conocimiento_id: str, titulo: str, descripcion_breve: str, 
         "actividades_relacionadas": actividades_relacionadas or None,
         "hallazgos_relacionados": hallazgos_relacionados or None,
         "conceptos": conceptos or None, "objetivo_estudio": objetivo_estudio or None,
+        "leccion_aprendida": leccion_aprendida or None,
         "fecha_actualizacion": dt.date.today(),
     }
     for nombre, valor in valores.items():

@@ -1,10 +1,19 @@
-"""Centro de Conocimiento — estudio, soluciones, conceptos, notas.
+"""Centro de Conocimiento — Knowledge Hub: estudio, soluciones, conceptos,
+notas, con panel de detalle persistente (no modal) y exploración por tabs.
 
-Mismo patrón que Hallazgos: fuente de verdad la pestaña CONOCIMIENTO (y
-CONOCIMIENTO_ARCHIVOS) de seguimiento.xlsx, escritura real vía knowledge.py,
-selección de fila reutilizada por Editar/Eliminar, vista de tarjetas en
-pantallas angostas, y guardas contra el disparo fantasma de callbacks al
-entrar a la página (dash/#1513).
+Mismo patrón que Hallazgos en lo estructural: fuente de verdad la pestaña
+CONOCIMIENTO (y CONOCIMIENTO_ARCHIVOS) de seguimiento.xlsx, escritura real
+vía knowledge.py, guardas contra el disparo fantasma de callbacks al entrar
+a la página (dash/#1513).
+
+Dos mecanismos de selección conviven a propósito:
+- Checkbox de la tabla administrativa (con-tabla) -> store-conocimiento-
+  seleccionado -> botones Ver/Editar/Eliminar. Para administración.
+- Click directo en una tarjeta/fila (Estoy estudiando, Conocimiento
+  reciente, Explorar) -> {"type": "con-item-select", "index":
+  conocimiento_id} -> abre el panel de detalle directamente, por ID (no por
+  posición, para no apuntar a la fila equivocada si el orden visible no
+  coincide con el de la tabla). Para navegar/consultar.
 """
 from __future__ import annotations
 
@@ -12,117 +21,162 @@ import base64
 
 import dash
 import dash_bootstrap_components as dbc
+import pandas as pd
 from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import data as data_mod
 import knowledge as km
 from components import badge_conocimiento_estado, chart_card, kpi_card, page_header
 from data_store import lookups_from_store
-from theme import CONOCIMIENTO_ESTADO_PILL, GRID, INK_MUTED, INK_PRIMARY
+from theme import CONOCIMIENTO_CATEGORIA_ICONO, CONOCIMIENTO_ESTADO_PILL, GRID, INK_MUTED, INK_PRIMARY
 
 dash.register_page(__name__, path="/conocimiento", name="Conocimiento", title="Conocimiento")
 
+
+# ==========================================================================
+# Layout
+# ==========================================================================
 layout = html.Div(className="page", children=[
-    page_header("Centro de Conocimiento",
-                 "Estudio, soluciones, errores y aprendizajes, conceptos, procedimientos, ideas, "
-                 "referencias y notas — tuyo, buscable, y conectado con tus proyectos."),
+    page_header("🧠 Centro de Conocimiento",
+                 "Tu memoria técnica y de aprendizaje conectada con tus proyectos."),
 
-    html.Div([
-        kpi_card("con-kpi-total", "Entradas totales", "bi bi-journal-bookmark"),
-        kpi_card("con-kpi-estudio", "En estudio", "bi bi-book", tone="tone-warning"),
-        kpi_card("con-kpi-aplicado", "Aprendido / Aplicado", "bi bi-check2-circle", tone="tone-good"),
-        kpi_card("con-kpi-global", "De ámbito global", "bi bi-globe"),
-    ], className="kpi-grid"),
-
-    chart_card([
-        html.Div([html.I(className="bi bi-book"), "Estoy estudiando"], className="section-title"),
-        html.Div("Entradas en estudio o en progreso, con tu avance por concepto.", className="section-caption"),
-        html.Div(id="con-estudiando-cards", className="hal-cards-grid"),
+    html.Div(className="con-header-actions mb-3", children=[
+        dbc.Input(id="con-f-query", type="text", placeholder="Buscar conocimiento...",
+                    className="con-header-search"),
+        dbc.Button([html.I(className="bi bi-upload"), "Importar"],
+                    id="btn-importar-conocimiento", className="btn-refresh", n_clicks=0),
+        dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo conocimiento"],
+                    id="btn-nuevo-conocimiento", className="btn-refresh", n_clicks=0),
     ]),
 
-    chart_card([
-        html.Div([html.I(className="bi bi-clock-history"), "Conocimiento reciente"], className="section-title"),
-        html.Div("Últimas entradas creadas o actualizadas.", className="section-caption"),
-        html.Div(id="con-recientes-cards", className="hal-cards-grid"),
-    ]),
+    html.Div(className="con-layout-grid", children=[
+        html.Div(className="con-layout-main", children=[
 
-    html.Div(className="filters-panel", children=[
-        html.Div([html.I(className="bi bi-sliders"), "Filtros de conocimiento"], className="filters-panel-title"),
-        html.Div(className="filters-grid", children=[
             html.Div([
-                html.Div([html.I(className="bi bi-search"), "Buscar"], className="filter-label"),
-                dbc.Input(id="con-f-query", type="text", placeholder="Título, contenido, etiquetas..."),
-            ], className="filter-field"),
-            html.Div([
-                html.Div([html.I(className="bi bi-tags"), "Categoría"], className="filter-label"),
-                dcc.Dropdown(id="con-f-categoria", options=km.CATEGORIAS, multi=True, placeholder="Todas"),
-            ], className="filter-field"),
-            html.Div([
-                html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
-                dcc.Dropdown(id="con-f-estado", options=km.ESTADOS, multi=True, placeholder="Todos"),
-            ], className="filter-field"),
-            html.Div([
-                html.Div([html.I(className="bi bi-folder2"), "Proyecto"], className="filter-label"),
-                dcc.Dropdown(id="con-f-proyecto", multi=True, placeholder="Todos"),
-            ], className="filter-field"),
-        ]),
-    ]),
+                kpi_card("con-kpi-total", "Conocimientos", "bi bi-journal-bookmark"),
+                kpi_card("con-kpi-estudio", "En estudio", "bi bi-book", tone="tone-warning"),
+                kpi_card("con-kpi-aplicado", "Aplicados", "bi bi-check2-circle", tone="tone-good"),
+                kpi_card("con-kpi-soluciones", "Soluciones", "bi bi-tools"),
+                kpi_card("con-kpi-revisar", "Por revisar", "bi bi-flag", tone="tone-critical"),
+            ], className="kpi-grid"),
 
-    chart_card([
-        html.Div(className="hal-actions-row", children=[
-            html.Div([html.I(className="bi bi-list-ul"), "Entradas de conocimiento"], className="section-title"),
-            dbc.Button([html.I(className="bi bi-eye"), "Ver detalle"],
-                        id="btn-ver-conocimiento", className="btn-refresh", disabled=True),
-            dbc.Button([html.I(className="bi bi-pencil"), "Editar"],
-                        id="btn-editar-conocimiento", className="btn-refresh", disabled=True),
-            dbc.Button([html.I(className="bi bi-trash"), "Eliminar"],
-                        id="btn-eliminar-conocimiento", className="btn-refresh", disabled=True),
-            html.Div(id="con-selection-msg", className="hal-selection-msg"),
-            dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo conocimiento"],
-                        id="btn-nuevo-conocimiento", className="btn-refresh ms-auto", n_clicks=0),
+            chart_card([
+                html.Div([html.I(className="bi bi-book"), "Estoy estudiando"], className="section-title"),
+                html.Div("Conocimientos en estudio o en progreso, con tu avance por concepto.",
+                          className="section-caption"),
+                html.Div(id="con-estudiando-cards", className="hal-cards-grid"),
+            ]),
+
+            chart_card([
+                html.Div([html.I(className="bi bi-clock-history"), "Conocimiento reciente"], className="section-title"),
+                html.Div("Últimas entradas creadas o actualizadas.", className="section-caption"),
+                html.Div(id="con-recientes-lista", className="con-reciente-lista"),
+            ]),
+
+            html.Div(className="filters-panel", children=[
+                html.Div([html.I(className="bi bi-sliders"), "Filtros avanzados"], className="filters-panel-title"),
+                html.Div(className="filters-grid", children=[
+                    html.Div([
+                        html.Div([html.I(className="bi bi-tags"), "Categoría"], className="filter-label"),
+                        dcc.Dropdown(id="con-f-categoria", options=km.CATEGORIAS, multi=True, placeholder="Todas"),
+                    ], className="filter-field"),
+                    html.Div([
+                        html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
+                        dcc.Dropdown(id="con-f-estado", options=km.ESTADOS, multi=True, placeholder="Todos"),
+                    ], className="filter-field"),
+                    html.Div([
+                        html.Div([html.I(className="bi bi-folder2"), "Proyecto"], className="filter-label"),
+                        dcc.Dropdown(id="con-f-proyecto", multi=True, placeholder="Todos"),
+                    ], className="filter-field"),
+                ]),
+            ]),
+
+            chart_card([
+                html.Div([html.I(className="bi bi-compass"), "Explorar conocimiento"], className="section-title"),
+                html.Div("Navega por categoría, o cambia a tabla para administrar (editar/eliminar).",
+                          className="section-caption"),
+                html.Div(className="con-explorar-toolbar", children=[
+                    dbc.Tabs(id="con-explorar-tabs", active_tab="todo", children=[
+                        dbc.Tab(label="Todo", tab_id="todo"),
+                        *[dbc.Tab(label=cat, tab_id=cat) for cat in km.CATEGORIAS],
+                    ]),
+                    html.Div(className="d-flex gap-1", children=[
+                        dbc.Button([html.I(className="bi bi-grid-3x3-gap"), "Tarjetas"],
+                                    id="con-btn-vista-tarjetas", className="btn-refresh active", size="sm", n_clicks=0),
+                        dbc.Button([html.I(className="bi bi-table"), "Tabla"],
+                                    id="con-btn-vista-tabla", className="btn-refresh", size="sm", n_clicks=0),
+                    ]),
+                ]),
+
+                html.Div(id="con-explorar-cards-wrap", style={"display": "block"}, children=[
+                    html.Div(id="con-explorar-cards", className="hal-cards-grid"),
+                ]),
+
+                html.Div(id="con-explorar-tabla-wrap", style={"display": "none"}, children=[
+                    html.Div(className="hal-actions-row", children=[
+                        dbc.Button([html.I(className="bi bi-eye"), "Ver detalle"],
+                                    id="btn-ver-conocimiento", className="btn-refresh", disabled=True),
+                        dbc.Button([html.I(className="bi bi-pencil"), "Editar"],
+                                    id="btn-editar-conocimiento", className="btn-refresh", disabled=True),
+                        dbc.Button([html.I(className="bi bi-trash"), "Eliminar"],
+                                    id="btn-eliminar-conocimiento", className="btn-refresh", disabled=True),
+                        html.Div(id="con-selection-msg", className="hal-selection-msg"),
+                    ]),
+                    html.Div("Selecciona una entrada con la casilla para ver el detalle, editarla o eliminarla.",
+                              className="section-caption"),
+                    html.Div(className="table-desktop-only", children=[
+                        dash_table.DataTable(
+                            id="con-tabla",
+                            columns=[
+                                {"name": "Título", "id": "titulo"},
+                                {"name": "Categoría", "id": "categoria"},
+                                {"name": "Estado", "id": "estado"},
+                                {"name": "Ámbito", "id": "ambito"},
+                                {"name": "Proyectos", "id": "proyectos"},
+                                {"name": "Actualizado", "id": "fecha_actualizacion_txt"},
+                            ],
+                            row_selectable="single",
+                            page_size=12,
+                            sort_action="native",
+                            filter_action="native",
+                            export_format="csv",
+                            export_headers="display",
+                            style_as_list_view=True,
+                            style_table={"overflowX": "auto"},
+                            style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
+                                        "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
+                                        "height": "auto", "border": "none"},
+                            style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
+                                          "border": "none", "borderBottom": f"1px solid {GRID}"},
+                            style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
+                            style_data_conditional=(
+                                [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
+                                + [{"if": {"filter_query": f'{{estado}} = "{k}"', "column_id": "estado"},
+                                    "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"}
+                                   for k, v in CONOCIMIENTO_ESTADO_PILL.items()]
+                            ),
+                            style_cell_conditional=[{"if": {"column_id": "titulo"}, "minWidth": "220px"},
+                                                     {"if": {"column_id": "estado"}, "maxWidth": "130px"}],
+                        ),
+                    ]),
+                    html.Div(id="con-tabla-cards", className="table-mobile-only"),
+                ]),
+            ]),
         ]),
-        html.Div("Selecciona una entrada con la casilla para ver el detalle, editarla o eliminarla.",
-                  className="section-caption"),
-        html.Div(className="table-desktop-only", children=[
-            dash_table.DataTable(
-                id="con-tabla",
-                columns=[
-                    {"name": "Título", "id": "titulo"},
-                    {"name": "Categoría", "id": "categoria"},
-                    {"name": "Estado", "id": "estado"},
-                    {"name": "Ámbito", "id": "ambito"},
-                    {"name": "Proyectos", "id": "proyectos"},
-                    {"name": "Actualizado", "id": "fecha_actualizacion_txt"},
-                ],
-                row_selectable="single",
-                page_size=12,
-                sort_action="native",
-                filter_action="native",
-                export_format="csv",
-                export_headers="display",
-                style_as_list_view=True,
-                style_table={"overflowX": "auto"},
-                style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
-                            "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
-                            "height": "auto", "border": "none"},
-                style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
-                              "border": "none", "borderBottom": f"1px solid {GRID}"},
-                style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
-                style_data_conditional=(
-                    [{"if": {"row_index": "odd"}, "backgroundColor": "#fbfbf9"}]
-                    + [{"if": {"filter_query": f'{{estado}} = "{k}"', "column_id": "estado"},
-                        "backgroundColor": v["bg"], "color": v["fg"], "fontWeight": "600"}
-                       for k, v in CONOCIMIENTO_ESTADO_PILL.items()]
-                ),
-                style_cell_conditional=[{"if": {"column_id": "titulo"}, "minWidth": "220px"},
-                                         {"if": {"column_id": "estado"}, "maxWidth": "130px"}],
-            ),
+
+        html.Div(id="con-detalle-panel", className="con-detalle-panel", children=[
+            html.Div(id="con-detalle-body", children=[
+                html.Div(className="empty-state", children=[
+                    html.I(className="bi bi-journal-text"),
+                    html.Div("Selecciona una entrada para ver el detalle."),
+                ]),
+            ]),
         ]),
-        html.Div(id="con-tabla-cards", className="table-mobile-only"),
     ]),
 
     dcc.Store(id="store-conocimiento-seleccionado"),
     dcc.Store(id="con-clicks-baseline"),
+    dcc.Store(id="con-importar-archivo"),
 
     # ---- Alta / edición ----
     dbc.Modal([
@@ -171,6 +225,10 @@ layout = html.Div(className="page", children=[
                        className="mb-1"),
             html.Div("El progreso general se calcula como el promedio de estos porcentajes.",
                       className="section-caption mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-lightbulb"), "Lección aprendida (opcional)"], className="filter-label"),
+                       dbc.Textarea(id="con-form-leccion", style={"height": "70px"},
+                                     placeholder="La idea clave que te quieres llevar de esto")],
+                       className="mb-3"),
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancelar", id="btn-cancelar-conocimiento", className="btn-cal-nav", n_clicks=0),
@@ -179,11 +237,37 @@ layout = html.Div(className="page", children=[
         ]),
     ], id="modal-conocimiento", is_open=False, size="lg", scrollable=True),
 
-    # ---- Detalle + acciones IA + archivos ----
+    # ---- Importar ----
     dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle(html.Span("Detalle", id="con-detalle-titulo")), close_button=True),
-        dbc.ModalBody(id="con-detalle-body"),
-    ], id="modal-detalle-conocimiento", is_open=False, size="lg", scrollable=True),
+        dbc.ModalHeader(dbc.ModalTitle("Importar conocimiento"), close_button=True),
+        dbc.ModalBody([
+            html.Div("Sube un archivo .md o .txt — su contenido se convierte en una entrada nueva "
+                      "y el archivo original queda adjunto como referencia.", className="section-caption mb-2"),
+            dcc.Upload(id="con-importar-upload", accept=".md,.txt",
+                        children=html.Div(["Arrastra un archivo o ", html.A("selecciónalo")]),
+                        className="con-upload-zone mb-3", multiple=False),
+            html.Div(id="con-importar-preview", className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-card-text"), "Título"], className="filter-label"),
+                       dbc.Input(id="con-importar-titulo", type="text", placeholder="Título de la entrada")],
+                       className="mb-3"),
+            dbc.Row([
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-tags"), "Categoría"], className="filter-label"),
+                                    dcc.Dropdown(id="con-importar-categoria", options=km.CATEGORIAS,
+                                                  value="Notas", clearable=False)], className="mb-3"), md=6),
+                dbc.Col(html.Div([html.Div([html.I(className="bi bi-tag"), "Etiquetas"], className="filter-label"),
+                                    dbc.Input(id="con-importar-etiquetas", type="text",
+                                               placeholder="separadas por coma")], className="mb-3"), md=6),
+            ]),
+            html.Div([html.Div([html.I(className="bi bi-folder2"), "Proyectos relacionados"], className="filter-label"),
+                       dcc.Dropdown(id="con-importar-proyectos", multi=True, placeholder="Ninguno (opcional)")],
+                       className="mb-3"),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-importar", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2"), "Importar"],
+                        id="con-btn-confirmar-importar", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-importar-conocimiento", is_open=False, size="lg", scrollable=True),
 
     # ---- Eliminar ----
     dbc.Modal([
@@ -203,6 +287,9 @@ layout = html.Div(className="page", children=[
 ])
 
 
+# ==========================================================================
+# Helpers
+# ==========================================================================
 def _split_csv(valor) -> list[str]:
     """Divide un campo de texto separado por comas en una lista, tolerando
     NaN: cuando una columna de CONOCIMIENTO queda vacía en todas las filas
@@ -214,11 +301,30 @@ def _split_csv(valor) -> list[str]:
     return [v.strip() for v in valor.split(",") if v.strip()]
 
 
+def _texto_o_vacio(valor) -> str:
+    return valor if isinstance(valor, str) else ""
+
+
 def _campos_vacios():
-    return (None, "", "", "Estudio", "En estudio", "Global", [], "", "", [], "", "")
+    return (None, "", "", "Estudio", "En estudio", "Global", [], "", "", [], "", "", "")
 
 
-def _con_card(idx: int, row: dict) -> html.Div:
+def _fecha_relativa(fecha) -> str:
+    if pd.isna(fecha):
+        return "—"
+    dias = (pd.Timestamp.now().normalize() - fecha.normalize()).days
+    if dias == 0:
+        return "Hoy"
+    if dias == 1:
+        return "Ayer"
+    return fecha.strftime("%d/%m/%Y")
+
+
+def _con_card_admin(idx: int, row: dict) -> html.Div:
+    """Tarjeta de administración (fallback móvil de con-tabla): selecciona
+    por POSICIÓN en la tabla filtrada, para habilitar Editar/Eliminar —
+    a propósito distinta del click-directo-por-ID usado en Estoy estudiando/
+    Reciente/Explorar."""
     pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
     return html.Div(className="hal-card", children=[
         html.Div(className="hal-card-head", children=[
@@ -240,48 +346,81 @@ def _con_card(idx: int, row: dict) -> html.Div:
     ])
 
 
-def _con_card_portada(row: dict, mostrar_progreso: bool = False) -> html.Div:
-    """Tarjeta para las secciones 'Estoy estudiando' / 'Conocimiento reciente'
-    de la portada. A diferencia de _con_card (que selecciona una fila de la
-    tabla por posición), el botón aquí navega directo por conocimiento_id —
-    estas tarjetas muestran un subconjunto en un orden distinto al de la
-    tabla, así que un índice posicional apuntaría a la fila equivocada."""
+def _con_card(row: dict, mostrar_progreso: bool = False, mostrar_etiquetas: bool = False) -> html.Div:
+    """Tarjeta clickeable por conocimiento_id (Estoy estudiando / Explorar).
+    Usada para navegar directo al panel de detalle."""
     pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
+    icono = CONOCIMIENTO_CATEGORIA_ICONO.get(row["categoria"], "bi-journal-text")
     hijos = [
         html.Div(className="hal-card-head", children=[
             html.Span(row["estado"], className="status-pill",
                        style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
-            html.Span(row["categoria"], className="hal-card-motor"),
+            html.Span([html.I(className=f"bi {icono} me-1"), row["categoria"]], className="hal-card-motor"),
         ]),
         html.Div(row["titulo"], className="hal-card-desc"),
     ]
+    if mostrar_etiquetas:
+        etiquetas = _split_csv(row.get("etiquetas"))
+        if etiquetas:
+            hijos.append(html.Div(className="d-flex flex-wrap gap-1 mb-2", children=[
+                html.Span(e, className="hal-card-motor") for e in etiquetas[:4]
+            ]))
     if mostrar_progreso and row.get("progreso") is not None:
+        conceptos = km.parse_conceptos(row.get("conceptos"))
+        comprendidos = sum(1 for c in conceptos if c["progreso"] >= 70)
         hijos.append(dbc.Progress(value=row["progreso"], label=f"{row['progreso']}%",
-                                    className="mb-2", style={"height": "0.6rem"}))
+                                    className="mb-1", style={"height": "0.6rem"}))
+        if conceptos:
+            hijos.append(html.Div(f"{comprendidos} de {len(conceptos)} conceptos",
+                                    className="hal-card-meta-value mb-2"))
     hijos.append(html.Div(className="hal-card-meta-grid", children=[
         html.Div([html.Span("Proyectos", className="hal-card-meta-label"),
-                   html.Span(row["proyectos"] or "—", className="hal-card-meta-value")]),
-        html.Div([html.Span("Actualizado", className="hal-card-meta-label"),
-                   html.Span(row["fecha_actualizacion_txt"], className="hal-card-meta-value")]),
+                   html.Span(row.get("proyectos") or "—", className="hal-card-meta-value")]),
+        html.Div([html.Span(("Último estudio" if mostrar_progreso else "Actualizado"),
+                              className="hal-card-meta-label"),
+                   html.Span(_fecha_relativa(row["fecha_actualizacion"]), className="hal-card-meta-value")]),
     ]))
     hijos.append(dbc.Button("Continuar estudiando" if mostrar_progreso else "Ver",
-                              id={"type": "con-portada-select", "index": row["conocimiento_id"]},
+                              id={"type": "con-item-select", "index": row["conocimiento_id"]},
                               className="btn-refresh btn-sm-card", size="sm", n_clicks=0))
     return html.Div(className="hal-card", children=hijos)
 
 
-# --------------------------------------------------------------------------
-# Opciones de filtros / formularios (catálogo real de proyectos)
-# --------------------------------------------------------------------------
+def _con_reciente_row(row: dict) -> html.Div:
+    pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
+    return html.Button(className="con-reciente-row", n_clicks=0,
+                         id={"type": "con-item-select", "index": row["conocimiento_id"]}, children=[
+        html.Span(row["estado"], className="status-pill",
+                   style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
+        html.Div([
+            html.Div(row["titulo"], className="con-reciente-row-title"),
+            html.Div(f"{row['categoria']} · {row.get('proyectos') or 'Global'}",
+                      className="con-reciente-row-meta"),
+        ]),
+        html.Div(row["fecha_actualizacion_txt"], className="con-reciente-row-fecha"),
+    ])
+
+
+def _estado_vacio_detalle() -> html.Div:
+    return html.Div(className="empty-state", children=[
+        html.I(className="bi bi-journal-text"),
+        html.Div("Selecciona una entrada para ver el detalle."),
+    ])
+
+
+# ==========================================================================
+# Opciones de filtros / formularios (catálogo real de proyectos/actividades)
+# ==========================================================================
 @dash.callback(
     Output("con-f-proyecto", "options"),
     Output("con-form-proyectos", "options"),
+    Output("con-importar-proyectos", "options"),
     Input("store-lookups", "data"),
 )
 def update_conocimiento_proyecto_options(lookups_json):
     lookups = lookups_from_store(lookups_json)
     opts = [{"label": r["proyecto"], "value": r["proyecto"]} for r in lookups["proyectos"]]
-    return opts, opts
+    return opts, opts, opts
 
 
 @dash.callback(
@@ -298,16 +437,18 @@ def update_conocimiento_actividad_options(store_json):
             for _, r in tabla.iterrows()]
 
 
-# --------------------------------------------------------------------------
-# KPIs + tabla + tarjetas
-# --------------------------------------------------------------------------
+# ==========================================================================
+# KPIs + tabla admin + tarjetas admin + tarjetas Explorar
+# ==========================================================================
 @dash.callback(
     Output("con-kpi-total", "children"),
     Output("con-kpi-estudio", "children"),
     Output("con-kpi-aplicado", "children"),
-    Output("con-kpi-global", "children"),
+    Output("con-kpi-soluciones", "children"),
+    Output("con-kpi-revisar", "children"),
     Output("con-tabla", "data"),
     Output("con-tabla-cards", "children"),
+    Output("con-explorar-cards", "children"),
     Input("store-conocimiento", "data"),
     Input("con-f-query", "value"),
     Input("con-f-categoria", "value"),
@@ -318,7 +459,13 @@ def update_conocimiento(store_json, query, categorias, estados, proyectos):
     from data_store import knowledge_from_store
     df = knowledge_from_store(store_json)
     if df.empty:
-        return "0", "0", "0", "0", [], []
+        return "0", "0", "0", "0", "0", [], [], []
+
+    total_global = len(df)
+    en_estudio_global = int(df["estado"].isin(["En estudio", "En progreso"]).sum())
+    aplicado_global = int(df["estado"].isin(["Aprendido", "Aplicado"]).sum())
+    soluciones_global = int(df["categoria"].eq("Soluciones").sum())
+    revisar_global = int(df["estado"].eq("Pendiente de revisar").sum())
 
     filtered = df
     if query:
@@ -337,29 +484,52 @@ def update_conocimiento(store_json, query, categorias, estados, proyectos):
         filtered = filtered[filtered["proyectos"].fillna("").apply(
             lambda p: any(pr.strip() in [x.strip() for x in p.split(",")] for pr in proyectos))]
 
-    total = len(filtered)
-    en_estudio = int(filtered["estado"].eq("En estudio").sum())
-    aplicado = int(filtered["estado"].isin(["Aprendido", "Aplicado"]).sum())
-    global_n = int(filtered["ambito"].eq("Global").sum())
-
     tabla = filtered.copy()
     tabla["fecha_actualizacion_txt"] = tabla["fecha_actualizacion"].dt.strftime("%d/%m/%Y").fillna("—")
     tabla = tabla.sort_values("fecha_actualizacion", ascending=False)
     cols = ["conocimiento_id", "titulo", "categoria", "estado", "ambito", "proyectos",
             "fecha_actualizacion_txt"]
     tabla_data = tabla[cols].to_dict("records")
-    cards = [_con_card(i, fila) for i, fila in enumerate(tabla_data)]
+    admin_cards = [_con_card_admin(i, fila) for i, fila in enumerate(tabla_data)]
 
-    return str(total), str(en_estudio), str(aplicado), str(global_n), tabla_data, cards
+    explorar_cards = [_con_card(row, mostrar_etiquetas=True) for _, row in tabla.iterrows()]
+
+    return (str(total_global), str(en_estudio_global), str(aplicado_global), str(soluciones_global),
+            str(revisar_global), tabla_data, admin_cards, explorar_cards)
 
 
-# --------------------------------------------------------------------------
-# Portada: "Estoy estudiando" / "Conocimiento reciente" (independiente de
-# los filtros de abajo — siempre muestra el estado real más reciente).
-# --------------------------------------------------------------------------
+@dash.callback(
+    Output("con-f-categoria", "value", allow_duplicate=True),
+    Input("con-explorar-tabs", "active_tab"),
+    prevent_initial_call=True,
+)
+def aplicar_tab_categoria(tab):
+    if not tab or tab == "todo":
+        return []
+    return [tab]
+
+
+@dash.callback(
+    Output("con-explorar-cards-wrap", "style"),
+    Output("con-explorar-tabla-wrap", "style"),
+    Output("con-btn-vista-tarjetas", "className"),
+    Output("con-btn-vista-tabla", "className"),
+    Input("con-btn-vista-tarjetas", "n_clicks"),
+    Input("con-btn-vista-tabla", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cambiar_vista_explorar(_n_tarjetas, _n_tabla):
+    if dash.ctx.triggered_id == "con-btn-vista-tabla":
+        return {"display": "none"}, {"display": "block"}, "btn-refresh", "btn-refresh active"
+    return {"display": "block"}, {"display": "none"}, "btn-refresh active", "btn-refresh"
+
+
+# ==========================================================================
+# Portada: "Estoy estudiando" / "Conocimiento reciente"
+# ==========================================================================
 @dash.callback(
     Output("con-estudiando-cards", "children"),
-    Output("con-recientes-cards", "children"),
+    Output("con-recientes-lista", "children"),
     Input("store-conocimiento", "data"),
 )
 def update_conocimiento_portada(store_json):
@@ -375,14 +545,14 @@ def update_conocimiento_portada(store_json):
                   .sort_values("fecha_actualizacion", ascending=False).head(6))
     recientes = df.sort_values("fecha_actualizacion", ascending=False).head(6)
 
-    tarjetas_estudiando = [_con_card_portada(row, mostrar_progreso=True) for _, row in estudiando.iterrows()]
-    tarjetas_recientes = [_con_card_portada(row, mostrar_progreso=False) for _, row in recientes.iterrows()]
-    return tarjetas_estudiando, tarjetas_recientes
+    tarjetas_estudiando = [_con_card(row, mostrar_progreso=True) for _, row in estudiando.iterrows()]
+    filas_recientes = [_con_reciente_row(row) for _, row in recientes.iterrows()]
+    return tarjetas_estudiando, filas_recientes
 
 
-# --------------------------------------------------------------------------
-# Selección (tabla + tarjetas comparten el mismo prop con la tabla)
-# --------------------------------------------------------------------------
+# ==========================================================================
+# Selección admin (checkbox de la tabla) — sin cambios de comportamiento
+# ==========================================================================
 @dash.callback(
     Output("con-tabla", "selected_rows", allow_duplicate=True),
     Input({"type": "con-card-select", "index": ALL}, "n_clicks"),
@@ -418,36 +588,40 @@ def update_conocimiento_selection(selected_rows, table_data):
     return False, False, False, "", table_data[idx]["conocimiento_id"]
 
 
-# --------------------------------------------------------------------------
+# ==========================================================================
 # Reset al entrar a la página (evita callbacks fantasma de dash/#1513)
-# --------------------------------------------------------------------------
+# ==========================================================================
 @dash.callback(
     Output("modal-conocimiento", "is_open", allow_duplicate=True),
-    Output("modal-detalle-conocimiento", "is_open", allow_duplicate=True),
+    Output("modal-importar-conocimiento", "is_open", allow_duplicate=True),
     Output("modal-eliminar-conocimiento", "is_open", allow_duplicate=True),
     Output("con-form-error", "children", allow_duplicate=True),
     Output("con-tabla", "selected_rows", allow_duplicate=True),
+    Output("con-detalle-panel", "className", allow_duplicate=True),
+    Output("con-detalle-body", "children", allow_duplicate=True),
     Output("con-clicks-baseline", "data"),
     Input("url", "pathname"),
     State("btn-nuevo-conocimiento", "n_clicks"),
     State("btn-editar-conocimiento", "n_clicks"),
     State("btn-eliminar-conocimiento", "n_clicks"),
     State("btn-ver-conocimiento", "n_clicks"),
+    State("btn-importar-conocimiento", "n_clicks"),
     prevent_initial_call=True,
 )
-def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver):
+def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver, n_importar):
     if pathname != "/conocimiento":
-        return (dash.no_update,) * 6
+        return (dash.no_update,) * 8
     baseline = {
         "btn-nuevo-conocimiento": n_nuevo or 0, "btn-editar-conocimiento": n_editar or 0,
         "btn-eliminar-conocimiento": n_eliminar or 0, "btn-ver-conocimiento": n_ver or 0,
+        "btn-importar-conocimiento": n_importar or 0,
     }
-    return False, False, False, None, [], baseline
+    return False, False, False, None, [], "con-detalle-panel", _estado_vacio_detalle(), baseline
 
 
-# --------------------------------------------------------------------------
+# ==========================================================================
 # Nuevo / editar: abrir, cancelar, guardar
-# --------------------------------------------------------------------------
+# ==========================================================================
 @dash.callback(
     Output("modal-conocimiento", "is_open"),
     Output("con-form-error", "children"),
@@ -463,6 +637,7 @@ def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver):
     Output("con-form-actividades", "value"),
     Output("con-form-objetivo", "value"),
     Output("con-form-conceptos", "value"),
+    Output("con-form-leccion", "value"),
     Output("con-form-modal-title", "children"),
     Input("btn-nuevo-conocimiento", "n_clicks"),
     State("con-clicks-baseline", "data"),
@@ -471,7 +646,7 @@ def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver):
 def abrir_nuevo_conocimiento(n_clicks, baseline):
     umbral = (baseline or {}).get("btn-nuevo-conocimiento", 0)
     if not n_clicks or n_clicks <= umbral:
-        return (dash.no_update,) * 15
+        return (dash.no_update,) * 16
     return (True, None, *_campos_vacios(), "Nuevo conocimiento")
 
 
@@ -490,6 +665,7 @@ def abrir_nuevo_conocimiento(n_clicks, baseline):
     Output("con-form-actividades", "value", allow_duplicate=True),
     Output("con-form-objetivo", "value", allow_duplicate=True),
     Output("con-form-conceptos", "value", allow_duplicate=True),
+    Output("con-form-leccion", "value", allow_duplicate=True),
     Output("con-form-modal-title", "children", allow_duplicate=True),
     Input("btn-editar-conocimiento", "n_clicks"),
     State("store-conocimiento-seleccionado", "data"),
@@ -499,7 +675,7 @@ def abrir_nuevo_conocimiento(n_clicks, baseline):
 )
 def abrir_editar_conocimiento(n_clicks, conocimiento_id, store_json, baseline):
     from data_store import knowledge_from_store
-    vacio = (dash.no_update,) * 15
+    vacio = (dash.no_update,) * 16
     umbral = (baseline or {}).get("btn-editar-conocimiento", 0)
     if not n_clicks or n_clicks <= umbral or not conocimiento_id:
         return vacio
@@ -510,13 +686,10 @@ def abrir_editar_conocimiento(n_clicks, conocimiento_id, store_json, baseline):
     r = fila.iloc[0]
     proyectos_list = _split_csv(r["proyectos"])
     actividades_list = _split_csv(r["actividades_relacionadas"])
-    etiquetas_txt = r["etiquetas"] if isinstance(r["etiquetas"], str) else ""
-    fuente_txt = r["fuente"] if isinstance(r["fuente"], str) else ""
-    objetivo_txt = r["objetivo_estudio"] if isinstance(r["objetivo_estudio"], str) else ""
-    conceptos_txt = r["conceptos"] if isinstance(r["conceptos"], str) else ""
     return (True, None, r["titulo"], r["descripcion_breve"], r["contenido"], r["categoria"],
-            r["estado"], r["ambito"], proyectos_list, etiquetas_txt, fuente_txt,
-            actividades_list, objetivo_txt, conceptos_txt,
+            r["estado"], r["ambito"], proyectos_list, _texto_o_vacio(r["etiquetas"]),
+            _texto_o_vacio(r["fuente"]), actividades_list, _texto_o_vacio(r["objetivo_estudio"]),
+            _texto_o_vacio(r["conceptos"]), _texto_o_vacio(r["leccion_aprendida"]),
             f"Editar: {r['titulo']}")
 
 
@@ -550,12 +723,13 @@ def cancelar_conocimiento(_n_clicks):
     State("con-form-actividades", "value"),
     State("con-form-objetivo", "value"),
     State("con-form-conceptos", "value"),
+    State("con-form-leccion", "value"),
     State("con-form-modal-title", "children"),
     prevent_initial_call=True,
 )
 def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenido, categoria,
                           estado, ambito, proyectos_list, etiquetas, fuente, actividades_list,
-                          objetivo, conceptos, modal_title):
+                          objetivo, conceptos, leccion, modal_title):
     from data_store import knowledge_to_store
     if not n_clicks:
         return (dash.no_update,) * 6
@@ -573,24 +747,20 @@ def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenid
     actividades_txt = ", ".join(actividades_list) if actividades_list else None
     es_edicion = modal_title and str(modal_title).startswith("Editar:")
 
+    kwargs = dict(
+        titulo=titulo.strip(), descripcion_breve=(desc_breve or "").strip(), contenido=contenido.strip(),
+        categoria=categoria, estado=estado, ambito=ambito, proyectos=proyectos_txt,
+        etiquetas=(etiquetas or "").strip() or None, fuente=(fuente or "").strip() or None,
+        actividades_relacionadas=actividades_txt, objetivo_estudio=(objetivo or "").strip() or None,
+        conceptos=(conceptos or "").strip() or None, leccion_aprendida=(leccion or "").strip() or None,
+    )
+
     if es_edicion:
         if not seleccionado_id:
             return error("No hay ninguna entrada seleccionada.")
-        ok, msg = km.update_knowledge(
-            seleccionado_id, titulo=titulo.strip(), descripcion_breve=(desc_breve or "").strip(),
-            contenido=contenido.strip(), categoria=categoria, estado=estado, ambito=ambito,
-            proyectos=proyectos_txt, etiquetas=(etiquetas or "").strip() or None,
-            fuente=(fuente or "").strip() or None, actividades_relacionadas=actividades_txt,
-            objetivo_estudio=(objetivo or "").strip() or None, conceptos=(conceptos or "").strip() or None,
-        )
+        ok, msg = km.update_knowledge(seleccionado_id, **kwargs)
     else:
-        ok, msg, _new_id = km.add_knowledge(
-            titulo=titulo.strip(), descripcion_breve=(desc_breve or "").strip(), contenido=contenido.strip(),
-            categoria=categoria, estado=estado, ambito=ambito, proyectos=proyectos_txt,
-            etiquetas=(etiquetas or "").strip() or None, fuente=(fuente or "").strip() or None,
-            actividades_relacionadas=actividades_txt, objetivo_estudio=(objetivo or "").strip() or None,
-            conceptos=(conceptos or "").strip() or None,
-        )
+        ok, msg, _new_id = km.add_knowledge(**kwargs)
     if not ok:
         return error(msg)
 
@@ -598,9 +768,108 @@ def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenid
     return knowledge_to_store(nuevo_df), False, None, f"✓ {msg}", "success", True
 
 
-# --------------------------------------------------------------------------
+# ==========================================================================
+# Importar: abrir/cancelar, procesar archivo, confirmar
+# ==========================================================================
+@dash.callback(
+    Output("modal-importar-conocimiento", "is_open"),
+    Output("con-importar-archivo", "data"),
+    Output("con-importar-preview", "children"),
+    Output("con-importar-titulo", "value"),
+    Output("con-importar-categoria", "value"),
+    Output("con-importar-proyectos", "value"),
+    Output("con-importar-etiquetas", "value"),
+    Input("btn-importar-conocimiento", "n_clicks"),
+    State("con-clicks-baseline", "data"),
+    prevent_initial_call=True,
+)
+def abrir_importar_conocimiento(n_clicks, baseline):
+    umbral = (baseline or {}).get("btn-importar-conocimiento", 0)
+    if not n_clicks or n_clicks <= umbral:
+        return (dash.no_update,) * 7
+    return True, None, None, "", "Notas", [], ""
+
+
+@dash.callback(
+    Output("modal-importar-conocimiento", "is_open", allow_duplicate=True),
+    Input("btn-cancelar-importar", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancelar_importar(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("con-importar-archivo", "data", allow_duplicate=True),
+    Output("con-importar-preview", "children", allow_duplicate=True),
+    Output("con-importar-titulo", "value", allow_duplicate=True),
+    Input("con-importar-upload", "contents"),
+    State("con-importar-upload", "filename"),
+    prevent_initial_call=True,
+)
+def procesar_archivo_importar(contents, filename):
+    if not contents:
+        return dash.no_update, dash.no_update, dash.no_update
+    try:
+        _header, encoded = contents.split(",", 1)
+        raw = base64.b64decode(encoded)
+        texto = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return (None, html.Div("No se pudo leer ese archivo. Debe ser .md o .txt en texto plano.",
+                                  className="section-caption", style={"color": "#a52323"}), dash.no_update)
+    titulo_sugerido = filename.rsplit(".", 1)[0] if filename else "Importado"
+    recorte = texto if len(texto) <= 3000 else texto[:3000] + "\n\n*(vista previa recortada)*"
+    preview = html.Div([
+        html.Div(f"📄 {filename}", className="section-caption mb-2"),
+        dcc.Markdown(recorte),
+    ])
+    return {"filename": filename, "contents": contents, "texto": texto}, preview, titulo_sugerido
+
+
+@dash.callback(
+    Output("store-conocimiento", "data", allow_duplicate=True),
+    Output("modal-importar-conocimiento", "is_open", allow_duplicate=True),
+    Output("con-toast", "children", allow_duplicate=True),
+    Output("con-toast", "icon", allow_duplicate=True),
+    Output("con-toast", "is_open", allow_duplicate=True),
+    Input("con-btn-confirmar-importar", "n_clicks"),
+    State("con-importar-archivo", "data"),
+    State("con-importar-titulo", "value"),
+    State("con-importar-categoria", "value"),
+    State("con-importar-proyectos", "value"),
+    State("con-importar-etiquetas", "value"),
+    prevent_initial_call=True,
+)
+def confirmar_importar(n_clicks, archivo, titulo, categoria, proyectos_list, etiquetas):
+    from data_store import knowledge_to_store
+    if not n_clicks:
+        return (dash.no_update,) * 5
+    if not archivo or not archivo.get("texto"):
+        return dash.no_update, dash.no_update, "Primero selecciona un archivo .md o .txt.", "danger", True
+    if not titulo or not titulo.strip():
+        return dash.no_update, dash.no_update, "Escribe un título.", "danger", True
+
+    proyectos_txt = ", ".join(proyectos_list) if proyectos_list else None
+    ok, msg, new_id = km.add_knowledge(
+        titulo=titulo.strip(), descripcion_breve=f"Importado desde {archivo['filename']}",
+        contenido=archivo["texto"], categoria=categoria or "Notas", estado="Pendiente de revisar",
+        ambito="Proyecto" if proyectos_txt else "Global", proyectos=proyectos_txt,
+        etiquetas=(etiquetas or "").strip() or None,
+    )
+    if not ok:
+        return dash.no_update, dash.no_update, msg, "danger", True
+
+    _header, encoded = archivo["contents"].split(",", 1)
+    raw = base64.b64decode(encoded)
+    km.add_knowledge_file(new_id, archivo["filename"], raw)
+
+    nuevo_df = km.load_knowledge()
+    return knowledge_to_store(nuevo_df), False, f"✓ {msg}", "success", True
+
+
+# ==========================================================================
 # Eliminar
-# --------------------------------------------------------------------------
+# ==========================================================================
 @dash.callback(
     Output("modal-eliminar-conocimiento", "is_open"),
     Output("con-eliminar-modal-body", "children"),
@@ -661,54 +930,19 @@ def confirmar_eliminar_conocimiento(n_clicks, conocimiento_id):
     return dash.no_update, False, msg, "danger", True
 
 
-# --------------------------------------------------------------------------
-# Detalle: contenido, archivos, subir archivo, acciones de IA
-# --------------------------------------------------------------------------
+# ==========================================================================
+# Detalle: panel persistente con pestañas, acciones de IA, archivos
+# ==========================================================================
 def _accion_ia_boton(label: str, icon: str, prompt_tipo: str) -> dbc.Button:
     return dbc.Button([html.I(className=icon), label], size="sm", className="btn-refresh btn-sm-card",
                         id={"type": "con-accion-ia", "index": prompt_tipo}, n_clicks=0)
 
 
-@dash.callback(
-    Output("modal-detalle-conocimiento", "is_open"),
-    Output("con-detalle-titulo", "children"),
-    Output("con-detalle-body", "children"),
-    Input("btn-ver-conocimiento", "n_clicks"),
-    Input({"type": "con-archivo-subido", "index": ALL}, "contents"),
-    Input({"type": "con-portada-select", "index": ALL}, "n_clicks"),
-    State({"type": "con-archivo-subido", "index": ALL}, "filename"),
-    State("store-conocimiento-seleccionado", "data"),
-    State("con-clicks-baseline", "data"),
-    State("store-data", "data"),
-    prevent_initial_call=True,
-)
-def abrir_detalle_conocimiento(n_clicks, contents_list, portada_clicks_list, filenames_list,
-                                conocimiento_id, baseline, actividades_json):
-    umbral = (baseline or {}).get("btn-ver-conocimiento", 0)
-    triggered_id = dash.ctx.triggered_id
-    es_por_boton = triggered_id == "btn-ver-conocimiento"
-    es_por_portada = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-portada-select"
-    if es_por_boton and (not n_clicks or n_clicks <= umbral):
-        return dash.no_update, dash.no_update, dash.no_update
-    if es_por_portada:
-        if not portada_clicks_list or not any(portada_clicks_list):
-            return dash.no_update, dash.no_update, dash.no_update
-        conocimiento_id = triggered_id["index"]
-    if not conocimiento_id:
-        return dash.no_update, dash.no_update, dash.no_update
-
-    if not es_por_boton and not es_por_portada and contents_list and any(contents_list):
-        idx = [i for i, c in enumerate(contents_list) if c][-1]
-        contenido_b64 = contents_list[idx]
-        filename = filenames_list[idx]
-        _header, encoded = contenido_b64.split(",", 1)
-        raw = base64.b64decode(encoded)
-        km.add_knowledge_file(conocimiento_id, filename, raw)
-
+def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     df = km.load_knowledge()
     fila = df[df["conocimiento_id"] == conocimiento_id]
     if fila.empty:
-        return dash.no_update, dash.no_update, dash.no_update
+        return _estado_vacio_detalle()
     r = fila.iloc[0]
 
     dfa = km.load_knowledge_files()
@@ -718,21 +952,59 @@ def abrir_detalle_conocimiento(n_clicks, contents_list, portada_clicks_list, fil
         for _, a in archivos.iterrows()
     ]) if not archivos.empty else html.Div("Sin archivos adjuntos.", className="section-caption")
 
-    # ---- Estudio: objetivo, progreso y conceptos ----
-    bloque_estudio = []
-    if isinstance(r["objetivo_estudio"], str) and r["objetivo_estudio"]:
-        bloque_estudio.append(html.Div([html.Span("🎯 ", className="me-1"), r["objetivo_estudio"]],
-                                          className="section-caption mb-2"))
-    conceptos = km.parse_conceptos(r["conceptos"] if isinstance(r["conceptos"], str) else None)
+    etiquetas = _split_csv(r["etiquetas"])
+
+    # ---- Resumen ----
+    leccion_txt = _texto_o_vacio(r["leccion_aprendida"])
+    tab_resumen = [
+        html.Div([badge_conocimiento_estado(r["estado"]),
+                   html.Span(r["categoria"], className="hal-card-motor ms-2")],
+                  className="d-flex align-items-center gap-2 mb-2"),
+        html.Div([html.Span(e, className="hal-card-motor") for e in etiquetas],
+                  className="con-detalle-etiquetas") if etiquetas else None,
+        html.Div(r["descripcion_breve"] or "", className="section-caption mb-3"),
+    ]
+    if leccion_txt:
+        tab_resumen.append(html.Div(className="con-leccion-box", children=[
+            html.I(className="bi bi-lightbulb-fill"),
+            html.Div([
+                html.Div("Lección aprendida", className="con-leccion-box-titulo"),
+                html.Div(leccion_txt, className="con-leccion-box-texto"),
+            ]),
+        ]))
+
+    # ---- Contenido ----
+    tab_contenido = [
+        dcc.Markdown(r["contenido"] or "", className="mb-3"),
+        html.Div("🤖 Acciones IA", className="section-title"),
+        html.Div(className="d-flex flex-wrap gap-2 mb-2", children=[
+            _accion_ia_boton("Explicarme", "bi bi-mortarboard", "explicar"),
+            _accion_ia_boton("Resumir", "bi bi-card-list", "resumir"),
+            _accion_ia_boton("Hacerme preguntas", "bi bi-question-circle", "preguntas"),
+            _accion_ia_boton("Crear ejercicios", "bi bi-pencil-square", "ejercicios"),
+            _accion_ia_boton("Mapa conceptual", "bi bi-diagram-3", "mapa"),
+            _accion_ia_boton("Ejemplo de código", "bi bi-code-slash", "codigo"),
+            _accion_ia_boton("Qué estudiar después", "bi bi-signpost", "siguiente"),
+        ]),
+    ]
+
+    # ---- Conceptos ----
+    conceptos = km.parse_conceptos(r["conceptos"])
+    tab_conceptos = []
+    if r["objetivo_estudio"]:
+        tab_conceptos.append(html.Div([html.Span("🎯 ", className="me-1"), r["objetivo_estudio"]],
+                                        className="section-caption mb-2"))
     if conceptos:
         progreso = km.progreso_promedio(r["conceptos"])
-        bloque_estudio.append(dbc.Progress(value=progreso, label=f"{progreso}%", className="mb-2"))
-        bloque_estudio.append(html.Div(className="d-flex flex-wrap gap-2 mb-3", children=[
+        tab_conceptos.append(dbc.Progress(value=progreso, label=f"{progreso}%", className="mb-2"))
+        tab_conceptos.append(html.Div(className="d-flex flex-wrap gap-2", children=[
             html.Span(f"{c['nombre']} · {c['progreso']}%", className="hal-card-motor")
             for c in conceptos
         ]))
+    else:
+        tab_conceptos.append(html.Div("Sin conceptos registrados todavía.", className="section-caption"))
 
-    # ---- Actividades relacionadas (por actividad_id sobre store-data) ----
+    # ---- Relaciones ----
     ids_actividad = _split_csv(r["actividades_relacionadas"])
     bloque_actividades = html.Div("Ninguna actividad relacionada.", className="section-caption")
     if ids_actividad:
@@ -746,13 +1018,11 @@ def abrir_detalle_conocimiento(n_clicks, contents_list, portada_clicks_list, fil
                 for _, a in relacionadas.iterrows()
             ])
 
-    # ---- Hallazgos relacionados (texto libre: los hallazgos no tienen ID propio) ----
-    hallazgos_txt = r["hallazgos_relacionados"] if isinstance(r["hallazgos_relacionados"], str) else ""
+    hallazgos_txt = _texto_o_vacio(r["hallazgos_relacionados"])
     bloque_hallazgos = (html.Div(hallazgos_txt, className="section-caption") if hallazgos_txt else
                           html.Div("Ningún hallazgo relacionado.", className="section-caption"))
 
-    # ---- Conocimiento relacionado: mismas etiquetas o mismo proyecto (sin embeddings) ----
-    etiquetas_propias = {e.lower() for e in _split_csv(r["etiquetas"])}
+    etiquetas_propias = {e.lower() for e in etiquetas}
     proyectos_propios = {p.lower() for p in _split_csv(r["proyectos"])}
 
     def _relacionado(otra) -> bool:
@@ -770,41 +1040,113 @@ def abrir_detalle_conocimiento(n_clicks, contents_list, portada_clicks_list, fil
             for a in relacionadas_kw
         ])
 
-    body = html.Div([
-        html.Div([badge_conocimiento_estado(r["estado"]),
-                   html.Span(r["categoria"], className="hal-card-motor ms-2")],
-                  className="d-flex align-items-center gap-2 mb-3"),
-        html.Div(r["descripcion_breve"] or "", className="section-caption mb-2"),
-        *bloque_estudio,
-        dcc.Markdown(r["contenido"] or "", className="mb-3"),
-        html.Div(className="d-flex flex-wrap gap-2 mb-3", children=[
-            _accion_ia_boton("Explicarme", "bi bi-mortarboard", "explicar"),
-            _accion_ia_boton("Resumir", "bi bi-card-list", "resumir"),
-            _accion_ia_boton("Hacerme preguntas", "bi bi-question-circle", "preguntas"),
-            _accion_ia_boton("Crear ejercicios", "bi bi-pencil-square", "ejercicios"),
-            _accion_ia_boton("Mapa conceptual", "bi bi-diagram-3", "mapa"),
-            _accion_ia_boton("Ejemplo de código", "bi bi-code-slash", "codigo"),
-            _accion_ia_boton("Qué estudiar después", "bi bi-signpost", "siguiente"),
-        ]),
-        html.Div("Actividades relacionadas", className="section-title"),
-        bloque_actividades,
-        html.Div("Hallazgos relacionados", className="section-title mt-2"),
-        bloque_hallazgos,
-        html.Div("Conocimiento relacionado", className="section-title mt-2"),
-        bloque_relacionado,
-        html.Div("Archivos adjuntos", className="section-title mt-2"),
+    proyectos_txt = r["proyectos"] or "Ninguno"
+    tab_relaciones = dbc.Row([
+        dbc.Col([html.Div("Proyectos", className="section-title"),
+                  html.Div(proyectos_txt, className="section-caption")], md=6, className="mb-3"),
+        dbc.Col([html.Div("Actividades relacionadas", className="section-title"),
+                  bloque_actividades], md=6, className="mb-3"),
+        dbc.Col([html.Div("Hallazgos relacionados", className="section-title"),
+                  bloque_hallazgos], md=6, className="mb-3"),
+        dbc.Col([html.Div("Conocimiento relacionado", className="section-title"),
+                  bloque_relacionado], md=6, className="mb-3"),
+    ])
+
+    # ---- Archivos ----
+    tab_archivos = [
         lista_archivos,
         dcc.Upload(id={"type": "con-archivo-subido", "index": conocimiento_id},
                     children=html.Div(["Arrastra un archivo o ", html.A("selecciónalo")]),
-                    className="con-upload-zone", multiple=False),
+                    className="con-upload-zone mt-2", multiple=False),
+    ]
+
+    # ---- Historial (honesto: solo lo que realmente se guarda) ----
+    tab_historial = html.Div([
+        html.Div([html.Span("Creado: ", className="hal-card-meta-label"),
+                   html.Span(r["fecha_creacion"].strftime("%d/%m/%Y") if pd.notna(r["fecha_creacion"]) else "—")],
+                  className="mb-2"),
+        html.Div([html.Span("Última actualización: ", className="hal-card-meta-label"),
+                   html.Span(r["fecha_actualizacion"].strftime("%d/%m/%Y") if pd.notna(r["fecha_actualizacion"]) else "—")]),
+        html.Div("El registro de cambios detallado por campo no está disponible todavía.",
+                  className="section-caption mt-2"),
     ])
-    return True, r["titulo"], body
+
+    return html.Div([
+        html.Div(className="d-flex justify-content-between align-items-start mb-2", children=[
+            html.Div(r["titulo"], id="con-detalle-titulo", className="section-title", style={"fontSize": "1.05rem"}),
+            dbc.Button(html.I(className="bi bi-x-lg"), id="con-detalle-cerrar",
+                        className="btn-refresh con-detalle-cerrar-btn", size="sm", n_clicks=0),
+        ]),
+        dbc.Tabs(active_tab="resumen", children=[
+            dbc.Tab(tab_resumen, label="Resumen", tab_id="resumen"),
+            dbc.Tab(tab_contenido, label="Contenido", tab_id="contenido"),
+            dbc.Tab(tab_conceptos, label="Conceptos", tab_id="conceptos"),
+            dbc.Tab(tab_relaciones, label="Relaciones", tab_id="relaciones"),
+            dbc.Tab(tab_archivos, label="Archivos", tab_id="archivos"),
+            dbc.Tab(tab_historial, label="Historial", tab_id="historial"),
+        ]),
+    ])
+
+
+@dash.callback(
+    Output("con-detalle-panel", "className"),
+    Output("con-detalle-body", "children"),
+    Output("store-conocimiento-seleccionado", "data", allow_duplicate=True),
+    Input("btn-ver-conocimiento", "n_clicks"),
+    Input({"type": "con-item-select", "index": ALL}, "n_clicks"),
+    Input({"type": "con-archivo-subido", "index": ALL}, "contents"),
+    Input("con-detalle-cerrar", "n_clicks"),
+    State({"type": "con-archivo-subido", "index": ALL}, "filename"),
+    State("store-conocimiento-seleccionado", "data"),
+    State("con-clicks-baseline", "data"),
+    State("store-data", "data"),
+    prevent_initial_call=True,
+)
+def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, _n_cerrar, filenames_list,
+                                conocimiento_id, baseline, actividades_json):
+    umbral = (baseline or {}).get("btn-ver-conocimiento", 0)
+    triggered_id = dash.ctx.triggered_id
+
+    if triggered_id == "con-detalle-cerrar":
+        # No se toca store-conocimiento-seleccionado al cerrar: si el usuario
+        # había seleccionado una fila por checkbox para Editar/Eliminar, esa
+        # selección administrativa debe seguir intacta aunque cierre el panel.
+        return "con-detalle-panel", _estado_vacio_detalle(), dash.no_update
+
+    es_por_boton = triggered_id == "btn-ver-conocimiento"
+    es_por_item = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-item-select"
+    es_por_archivo = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-archivo-subido"
+
+    if es_por_boton and (not n_clicks or n_clicks <= umbral):
+        return dash.no_update, dash.no_update, dash.no_update
+    if es_por_item:
+        if not item_clicks_list or not any(item_clicks_list):
+            return dash.no_update, dash.no_update, dash.no_update
+        conocimiento_id = triggered_id["index"]
+    if not conocimiento_id:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    if es_por_archivo and contents_list and any(contents_list):
+        idx = [i for i, c in enumerate(contents_list) if c][-1]
+        contenido_b64 = contents_list[idx]
+        filename = filenames_list[idx]
+        _header, encoded = contenido_b64.split(",", 1)
+        raw = base64.b64decode(encoded)
+        km.add_knowledge_file(conocimiento_id, filename, raw)
+
+    # Se fija store-conocimiento-seleccionado al ID mostrado (no solo al
+    # seleccionado por checkbox) para que "Acciones IA" siempre opere sobre
+    # la entrada que el usuario está viendo, sin importar cómo llegó a ella
+    # (tarjeta clickeada directamente o fila de la tabla administrativa).
+    return ("con-detalle-panel con-detalle-abierto",
+            _construir_detalle(conocimiento_id, actividades_json), conocimiento_id)
 
 
 # --------------------------------------------------------------------------
-# Botones de acción IA: arman el prompt y navegan al Asistente con el
-# contenido pre-cargado (el usuario revisa y envía — nunca se llama a OpenAI
-# automáticamente, para no gastar tokens sin que el usuario lo pida).
+# Botones de acción IA: arman el prompt (+ contexto de proyecto) y navegan
+# al Asistente con el contenido pre-cargado (el usuario revisa y envía —
+# nunca se llama a OpenAI automáticamente, para no gastar tokens sin que el
+# usuario lo pida).
 # --------------------------------------------------------------------------
 _PROMPTS_IA = {
     "explicar": "Explícame esto como si estuviera empezando a aprenderlo:",
@@ -822,19 +1164,23 @@ _PROMPTS_IA = {
     Output("url", "pathname", allow_duplicate=True),
     Input({"type": "con-accion-ia", "index": ALL}, "n_clicks"),
     State("store-conocimiento-seleccionado", "data"),
-    State("con-detalle-titulo", "children"),
     prevent_initial_call=True,
 )
-def usar_accion_ia(n_clicks_list, conocimiento_id, titulo):
-    if not n_clicks_list or not any(n_clicks_list) or not conocimiento_id:
+def usar_accion_ia(n_clicks_list, conocimiento_id):
+    if not n_clicks_list or not any(n_clicks_list):
         return dash.no_update, dash.no_update
     triggered = dash.ctx.triggered_id
     if not triggered or not isinstance(triggered, dict):
         return dash.no_update, dash.no_update
-    prefijo = _PROMPTS_IA.get(triggered["index"], "Ayúdame con esto:")
 
     df = km.load_knowledge()
-    fila = df[df["conocimiento_id"] == conocimiento_id]
-    contenido = fila.iloc[0]["contenido"] if not fila.empty else ""
-    prompt = f"{prefijo}\n\n**{titulo}**\n\n{contenido}"
-    return prompt, "/asistente"
+    fila = df[df["conocimiento_id"] == conocimiento_id] if conocimiento_id else df.iloc[0:0]
+    if fila.empty:
+        return dash.no_update, dash.no_update
+    r = fila.iloc[0]
+
+    prefijo = _PROMPTS_IA.get(triggered["index"], "Ayúdame con esto:")
+    prompt = f"{prefijo}\n\n**{r['titulo']}**\n\n{r['contenido'] or ''}"
+    proyectos = _split_csv(r["proyectos"])
+    payload = {"prompt": prompt, "proyecto_contexto": proyectos[0] if proyectos else None}
+    return payload, "/asistente"

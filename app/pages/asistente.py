@@ -38,6 +38,15 @@ def _burbuja(mensaje: dict) -> html.Div:
     )
 
 
+def _texto_prompt(payload) -> str:
+    """store-prompt-pendiente puede ser un dict {"prompt", "proyecto_contexto"}
+    (botones de Acción IA de /conocimiento, que también fijan el contexto de
+    proyecto) o, por compatibilidad, un string simple."""
+    if isinstance(payload, dict):
+        return payload.get("prompt") or ""
+    return payload or ""
+
+
 def _sin_configurar() -> html.Div:
     return html.Div(className="empty-state", children=[
         html.I(className="bi bi-robot"),
@@ -141,9 +150,9 @@ if ai.is_configured():
                 cid = conversaciones[0]["conversacion_id"]
                 historial = ai.obtener_conversacion(cid)
                 burbujas = [_burbuja(m) for m in historial.get("mensajes", [])]
-                return cid, burbujas, (prompt_pendiente or "")
+                return cid, burbujas, _texto_prompt(prompt_pendiente)
             cid = ai.nueva_conversacion_id()
-            return cid, [], (prompt_pendiente or "")
+            return cid, [], _texto_prompt(prompt_pendiente)
 
         if triggered == "ast-btn-nueva-conversacion":
             if not n_nueva:
@@ -166,6 +175,21 @@ if ai.is_configured():
     )
     def limpiar_prompt_pendiente(_conv_id):
         return None
+
+    @dash.callback(
+        Output("ast-selector-contexto", "value", allow_duplicate=True),
+        Input("store-prompt-pendiente", "data"),
+        prevent_initial_call=True,
+    )
+    def aplicar_contexto_pendiente(prompt_pendiente):
+        # Cuando el prompt viene de un botón de Acción IA en /conocimiento
+        # (sección "acciones rápidas con IA" de una entrada), preseleccionar
+        # el proyecto de esa entrada como contexto — así la pregunta que el
+        # usuario está a punto de enviar ya prioriza ese proyecto sin que
+        # tenga que elegirlo de nuevo.
+        if isinstance(prompt_pendiente, dict) and prompt_pendiente.get("proyecto_contexto"):
+            return prompt_pendiente["proyecto_contexto"]
+        return dash.no_update
 
     @dash.callback(
         Output("ast-mensajes", "children", allow_duplicate=True),
