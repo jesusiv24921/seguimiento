@@ -648,7 +648,12 @@ def _responder_con_openai(mensajes_previos: list[dict], contenido_usuario: str) 
                 uso["input_tokens"] += response.usage.input_tokens
                 uso["output_tokens"] += response.usage.output_tokens
                 uso["cached_tokens"] += response.usage.input_tokens_details.cached_tokens
-            input_items += [item.model_dump() for item in response.output]
+            # Reenviar los objetos del SDK tal cual (NO un .model_dump() manual):
+            # el dump completo arrastra campos de solo-lectura de la respuesta
+            # (p.ej. "status" en ciertas variantes) que la API rechaza como
+            # entrada del siguiente turno con "Unknown parameter". Este es el
+            # patrón documentado por OpenAI para encadenar tool-calling.
+            input_items += list(response.output)
             llamadas = [item for item in response.output if item.type == "function_call"]
             if not llamadas:
                 texto = response.output_text
