@@ -7,3 +7,12 @@ __pycache__/
 # Proyecto de Power BI y archivo de respaldo, no forman parte de la app Dash
 SeguimientoActividades/
 seguimiento_LIMPIO.xlsx
+
+# Archivos adjuntos de Conocimiento e historial del Asistente: datos reales
+# del usuario, viven en el disco persistente de Render, no en el repo
+# (mismo criterio que seguimiento.xlsx en producción, que tampoco se pisa
+# desde git salvo la siembra inicial).
+conocimiento_archivos/*
+!conocimiento_archivos/.gitkeep
+conversaciones/*
+!conversaciones/.gitkeep

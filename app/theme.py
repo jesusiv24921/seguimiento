@@ -59,6 +59,21 @@ HALLAZGO_ESTADO_COLOR = {
 # skill dataviz (naranja) para mantener el contraste CVD-safe en gráficos.
 COLOR_PROYECTO_BRAND = {**COLOR_PROYECTO, "New Opps": "#7a4ac4"}
 
+CONOCIMIENTO_ESTADO_PILL = {
+    "En estudio":           {"bg": "rgba(201, 133, 0, 0.14)",  "fg": "#8a5a00"},
+    "En progreso":          {"bg": "rgba(42, 111, 214, 0.12)", "fg": "#1a56a8"},
+    "Aprendido":            {"bg": "rgba(12, 163, 12, 0.12)",  "fg": "#0a6b0a"},
+    "Aplicado":             {"bg": "rgba(12, 163, 12, 0.12)",  "fg": "#0a6b0a"},
+    "Pendiente de revisar": {"bg": "rgba(208, 59, 59, 0.10)",  "fg": "#a52323"},
+    "Archivado":            {"bg": "rgba(137, 135, 129, 0.14)", "fg": "#6b6a63"},
+    "Sin estado":           {"bg": "rgba(137, 135, 129, 0.14)", "fg": "#6b6a63"},
+}
+CONOCIMIENTO_CATEGORIA_ICONO = {
+    "Estudio": "bi-book", "Soluciones": "bi-tools", "Errores y aprendizajes": "bi-bug",
+    "Conceptos": "bi-journal-text", "Procedimientos": "bi-list-check",
+    "Ideas": "bi-lightbulb", "Referencias": "bi-link-45deg", "Notas": "bi-sticky",
+}
+
 MESES_ES = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
             "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]

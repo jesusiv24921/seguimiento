@@ -95,6 +95,29 @@ def hallazgos_from_store(json_str: str | None) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------
+# CONOCIMIENTO (Centro de Conocimiento)
+# --------------------------------------------------------------------------
+KNOWLEDGE_COLUMNS = ["conocimiento_id", "titulo", "descripcion_breve", "contenido", "categoria",
+                     "estado", "ambito", "proyectos", "etiquetas", "fuente",
+                     "actividades_relacionadas", "fecha_creacion", "fecha_actualizacion"]
+KNOWLEDGE_DATE_COLS = ["fecha_creacion", "fecha_actualizacion"]
+
+
+def knowledge_to_store(df: pd.DataFrame) -> str:
+    return df[KNOWLEDGE_COLUMNS].to_json(orient="records", date_format="iso")
+
+
+def knowledge_from_store(json_str: str | None) -> pd.DataFrame:
+    if not json_str:
+        return pd.DataFrame(columns=KNOWLEDGE_COLUMNS)
+    df = pd.read_json(io.StringIO(json_str), orient="records")
+    for col in KNOWLEDGE_DATE_COLS:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+    return df
+
+
+# --------------------------------------------------------------------------
 # Catálogos (PROYECTOS / TIPOS_ACTIVIDAD / CATEGORIAS) — para llenar los
 # dropdowns del formulario "Nueva actividad" con las opciones reales del
 # Excel, en vez de tenerlas hardcodeadas en el código.

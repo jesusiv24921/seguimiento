@@ -944,3 +944,84 @@ body {
     font-size: 0.8rem;
     color: var(--ink-muted);
 }
+
+/* ---------------------------------------------------------------------
+   Centro de Conocimiento: zona de subida de archivos
+--------------------------------------------------------------------- */
+.con-upload-zone {
+    border: 1.5px dashed var(--border-hairline-strong);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-sunken);
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.82rem;
+    color: var(--ink-muted);
+    cursor: pointer;
+    margin-top: 0.5rem;
+}
+.con-upload-zone:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------------------------------------------------------------------
+   Asistente: chat
+--------------------------------------------------------------------- */
+.ast-mensajes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 0.3rem 0.2rem 0.8rem 0.2rem;
+}
+.ast-burbuja {
+    max-width: 82%;
+    padding: 0.65rem 0.9rem;
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+.ast-burbuja-usuario {
+    align-self: flex-end;
+    background-color: var(--accent-wash-strong);
+    color: var(--ink-primary);
+    border-bottom-right-radius: 4px;
+}
+.ast-burbuja-asistente {
+    align-self: flex-start;
+    background-color: var(--surface-sunken);
+    color: var(--ink-primary);
+    border-bottom-left-radius: 4px;
+}
+.ast-burbuja-texto p:last-child { margin-bottom: 0; }
+.ast-burbuja-texto pre {
+    background-color: rgba(20, 20, 15, 0.06);
+    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-size: 0.8rem;
+}
+.ast-burbuja-texto .mermaid {
+    background-color: var(--surface-card);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    overflow-x: auto;
+}
+.ast-input-row {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-end;
+    border-top: 1px solid var(--border-hairline);
+    padding-top: 0.8rem;
+}
+.ast-input-row .btn-refresh {
+    height: 46px;
+    width: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+    .ast-mensajes { max-height: 45vh; }
+    .ast-burbuja { max-width: 92%; }
+}

@@ -6,3 +6,4 @@ plotly==6.6.0
 openpyxl==3.1.5
 holidays==0.103
 gunicorn==23.0.0
+openai==3.3.1

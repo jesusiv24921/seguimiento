@@ -19,9 +19,12 @@ import pandas as pd
 from dash import ALL, Input, Output, State, dcc, html
 from flask import request
 
+import ai_assistant
 import data as data_mod
+import knowledge as km
 from components import badge_estado, badge_prioridad
-from data_store import df_from_store, df_to_store, hallazgos_to_store, issues_to_store, lookups_to_store
+from data_store import (df_from_store, df_to_store, hallazgos_to_store, issues_to_store,
+                         knowledge_to_store, lookups_to_store)
 from theme import MESES_ES, fmt_rango_periodo
 
 # --------------------------------------------------------------------------
@@ -32,6 +35,11 @@ FONT_AND_ICONS_HEAD = """
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  window.mermaid = mermaid;
+  mermaid.initialize({ startOnLoad: false, theme: "neutral" });
+</script>
 """
 
 app = dash.Dash(
@@ -75,6 +83,8 @@ NAV_ITEMS = [
     ("/sentinel", "Sentinel Alerts", "bi-shield-check"),
     ("/new-opps", "New Opps", "bi-rocket-takeoff"),
     ("/analisis", "Análisis", "bi-bar-chart"),
+    ("/conocimiento", "Conocimiento", "bi-mortarboard"),
+    ("/asistente", "Asistente", "bi-robot"),
 ]
 
 
@@ -121,6 +131,8 @@ app.layout = html.Div(className="app-shell", children=[
     dcc.Store(id="store-hallazgos"),
     dcc.Store(id="store-lookups"),
     dcc.Store(id="store-selected-activity"),
+    dcc.Store(id="store-conocimiento"),
+    dcc.Store(id="store-prompt-pendiente"),
     dcc.Interval(id="interval-refresh", interval=5 * 60 * 1000, n_intervals=0),
 
     sidebar,
@@ -141,6 +153,8 @@ app.layout = html.Div(className="app-shell", children=[
         dbc.ModalFooter([
             dbc.Button([html.I(className="bi bi-flag-fill"), "Generar pendiente desde esta actividad"],
                         id="btn-generar-pendiente", className="btn-refresh", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-mortarboard-fill"), "Convertir en conocimiento"],
+                        id="btn-convertir-conocimiento", className="btn-refresh", n_clicks=0),
         ]),
     ], id="modal-actividad", is_open=False, size="lg", scrollable=True),
 
@@ -189,6 +203,7 @@ app.layout = html.Div(className="app-shell", children=[
     Output("store-issues", "data"),
     Output("store-hallazgos", "data", allow_duplicate=True),
     Output("store-lookups", "data"),
+    Output("store-conocimiento", "data", allow_duplicate=True),
     Output("last-update-text", "children"),
     Output("sidebar-updated", "children"),
     Input("btn-refresh", "n_clicks"),
@@ -199,12 +214,13 @@ def refresh_data(_n_clicks, _n_intervals):
     loaded = data_mod.load_data()
     df = loaded["actividades"]
     hallazgos_df = data_mod.load_hallazgos()
+    knowledge_df = km.load_knowledge()
     stamp_text = datetime.now().strftime("%d/%m/%Y %H:%M")
     topbar_stamp = [html.I(className="bi bi-record-circle-fill"), f"Datos al {stamp_text}"]
     sidebar_stamp = [html.Div("ACTUALIZADO", className="sidebar-updated-label"), stamp_text]
     lookups_json = lookups_to_store(loaded["proyectos"], loaded["tipos"], loaded["categorias"])
     return (df_to_store(df), issues_to_store(loaded["issues"]), hallazgos_to_store(hallazgos_df),
-            lookups_json, topbar_stamp, sidebar_stamp)
+            lookups_json, knowledge_to_store(knowledge_df), topbar_stamp, sidebar_stamp)
 
 
 # --------------------------------------------------------------------------
@@ -422,9 +438,9 @@ def cancel_generar_pendiente(_n_clicks):
     Output("store-data", "data", allow_duplicate=True),
     Output("modal-nuevo-pendiente", "is_open", allow_duplicate=True),
     Output("pnd-form-error", "children", allow_duplicate=True),
-    Output("shell-toast", "children"),
-    Output("shell-toast", "icon"),
-    Output("shell-toast", "is_open"),
+    Output("shell-toast", "children", allow_duplicate=True),
+    Output("shell-toast", "icon", allow_duplicate=True),
+    Output("shell-toast", "is_open", allow_duplicate=True),
     Input("btn-guardar-pendiente", "n_clicks"),
     State("store-selected-activity", "data"),
     State("store-data", "data"),
@@ -475,6 +491,56 @@ def guardar_pendiente(n_clicks, actividad_id, store_json, titulo, descripcion, p
 
     nuevo_df = data_mod.load_data()["actividades"]
     return df_to_store(nuevo_df), False, None, "✓ Pendiente creado a partir de la actividad seleccionada.", "success", True
+
+
+# --------------------------------------------------------------------------
+# Convertir en conocimiento: crea una entrada preliminar directo desde el
+# detalle de actividad (sin modal intermedio, igual que pide la sección 18
+# del pedido original) — el usuario la termina de editar en /conocimiento.
+# --------------------------------------------------------------------------
+@app.callback(
+    Output("store-conocimiento", "data", allow_duplicate=True),
+    Output("shell-toast", "children", allow_duplicate=True),
+    Output("shell-toast", "icon", allow_duplicate=True),
+    Output("shell-toast", "is_open", allow_duplicate=True),
+    Input("btn-convertir-conocimiento", "n_clicks"),
+    State("store-selected-activity", "data"),
+    State("store-data", "data"),
+    prevent_initial_call=True,
+)
+def convertir_actividad_en_conocimiento(n_clicks, actividad_id, store_json):
+    if not n_clicks:
+        return (dash.no_update,) * 4
+    if not actividad_id:
+        return dash.no_update, "No hay ninguna actividad seleccionada.", "danger", True
+
+    df = df_from_store(store_json)
+    row = df[df["actividad_id"] == actividad_id]
+    if row.empty:
+        return dash.no_update, "No se encontró la actividad de origen (los datos pudieron cambiar).", "danger", True
+    r = row.iloc[0]
+
+    partes = []
+    if r["descripcion"]:
+        partes.append(f"**Descripción:** {r['descripcion']}")
+    if r["resultado"]:
+        partes.append(f"**Resultado:** {r['resultado']}")
+    if r["observaciones"]:
+        partes.append(f"**Observaciones:** {r['observaciones']}")
+    contenido = "\n\n".join(partes) or "(completar)"
+
+    ok, msg, _new_id = km.add_knowledge(
+        titulo=r["actividad"], descripcion_breve=r["tema"] or "", contenido=contenido,
+        categoria="Soluciones", estado="Pendiente de revisar", ambito="Proyecto",
+        proyectos=r["proyecto"], etiquetas=None, fuente=None,
+        actividades_relacionadas=actividad_id,
+    )
+    if not ok:
+        return dash.no_update, msg, "danger", True
+
+    nuevo_df = km.load_knowledge()
+    return (knowledge_to_store(nuevo_df), f"✓ {msg} Puedes terminar de editarla en Conocimiento.",
+            "success", True)
 
 
 if __name__ == "__main__":

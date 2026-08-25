@@ -9,7 +9,7 @@ from __future__ import annotations
 import dash_bootstrap_components as dbc
 from dash import html
 
-from theme import ESTADO_PILL, HALLAZGO_ESTADO_PILL, PRIORIDAD_PILL, PROYECTO_PILL
+from theme import CONOCIMIENTO_ESTADO_PILL, ESTADO_PILL, HALLAZGO_ESTADO_PILL, PRIORIDAD_PILL, PROYECTO_PILL
 
 
 # --------------------------------------------------------------------------
@@ -35,6 +35,10 @@ def badge_proyecto(valor: str) -> html.Span:
 
 def badge_hallazgo_estado(valor: str) -> html.Span:
     return _pill(valor, HALLAZGO_ESTADO_PILL, "Sin estado")
+
+
+def badge_conocimiento_estado(valor: str) -> html.Span:
+    return _pill(valor, CONOCIMIENTO_ESTADO_PILL, "Sin estado")
 
 
 # --------------------------------------------------------------------------
