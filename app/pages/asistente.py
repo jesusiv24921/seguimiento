@@ -115,6 +115,16 @@ if ai.is_configured():
         if triggered == "url":
             if pathname != "/asistente":
                 return dash.no_update, dash.no_update, dash.no_update
+            # Al entrar a la pagina, retomar la conversacion mas reciente en
+            # vez de arrancar una vacia (antes, cada visita — incluso solo
+            # navegar a otra pagina y volver — reiniciaba el chat en blanco,
+            # aunque el archivo de la conversacion anterior seguia guardado).
+            conversaciones = ai.listar_conversaciones()
+            if conversaciones:
+                cid = conversaciones[0]["conversacion_id"]
+                historial = ai.obtener_conversacion(cid)
+                burbujas = [_burbuja(m) for m in historial.get("mensajes", [])]
+                return cid, burbujas, (prompt_pendiente or "")
             cid = ai.nueva_conversacion_id()
             return cid, [], (prompt_pendiente or "")
 
