@@ -34,6 +34,18 @@ layout = html.Div(className="page", children=[
         kpi_card("con-kpi-global", "De ámbito global", "bi bi-globe"),
     ], className="kpi-grid"),
 
+    chart_card([
+        html.Div([html.I(className="bi bi-book"), "Estoy estudiando"], className="section-title"),
+        html.Div("Entradas en estudio o en progreso, con tu avance por concepto.", className="section-caption"),
+        html.Div(id="con-estudiando-cards", className="hal-cards-grid"),
+    ]),
+
+    chart_card([
+        html.Div([html.I(className="bi bi-clock-history"), "Conocimiento reciente"], className="section-title"),
+        html.Div("Últimas entradas creadas o actualizadas.", className="section-caption"),
+        html.Div(id="con-recientes-cards", className="hal-cards-grid"),
+    ]),
+
     html.Div(className="filters-panel", children=[
         html.Div([html.I(className="bi bi-sliders"), "Filtros de conocimiento"], className="filters-panel-title"),
         html.Div(className="filters-grid", children=[
@@ -145,6 +157,20 @@ layout = html.Div(className="page", children=[
             html.Div([html.Div([html.I(className="bi bi-link-45deg"), "Fuente (opcional)"], className="filter-label"),
                        dbc.Input(id="con-form-fuente", type="text", placeholder="URL o referencia")],
                        className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-diagram-3"), "Actividades relacionadas"], className="filter-label"),
+                       dcc.Dropdown(id="con-form-actividades", multi=True, placeholder="Ninguna (opcional)")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-flag-fill"), "Objetivo de estudio (opcional)"], className="filter-label"),
+                       dbc.Input(id="con-form-objetivo", type="text",
+                                  placeholder="p.ej. Poder construir una API completa con FastAPI")],
+                       className="mb-3"),
+            html.Div([html.Div([html.I(className="bi bi-list-check"), "Conceptos y progreso (opcional)"], className="filter-label"),
+                       dbc.Textarea(id="con-form-conceptos", style={"height": "70px"},
+                                     placeholder="nombre:porcentaje separados por coma, p.ej. "
+                                                  "Routing:100, Pydantic:80, Dependency Injection:40")],
+                       className="mb-1"),
+            html.Div("El progreso general se calcula como el promedio de estos porcentajes.",
+                      className="section-caption mb-3"),
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancelar", id="btn-cancelar-conocimiento", className="btn-cal-nav", n_clicks=0),
@@ -177,8 +203,19 @@ layout = html.Div(className="page", children=[
 ])
 
 
+def _split_csv(valor) -> list[str]:
+    """Divide un campo de texto separado por comas en una lista, tolerando
+    NaN: cuando una columna de CONOCIMIENTO queda vacía en todas las filas
+    del store (p.ej. muy pocas entradas todavía), el viaje por JSON la
+    infiere como float64 (NaN) en vez de texto/None, y un simple
+    '(valor or "").split(",")' revienta con AttributeError."""
+    if not isinstance(valor, str) or not valor.strip():
+        return []
+    return [v.strip() for v in valor.split(",") if v.strip()]
+
+
 def _campos_vacios():
-    return (None, "", "", "", "Estudio", "En estudio", "Global", [], "", "")
+    return (None, "", "", "Estudio", "En estudio", "Global", [], "", "", [], "", "")
 
 
 def _con_card(idx: int, row: dict) -> html.Div:
@@ -203,6 +240,36 @@ def _con_card(idx: int, row: dict) -> html.Div:
     ])
 
 
+def _con_card_portada(row: dict, mostrar_progreso: bool = False) -> html.Div:
+    """Tarjeta para las secciones 'Estoy estudiando' / 'Conocimiento reciente'
+    de la portada. A diferencia de _con_card (que selecciona una fila de la
+    tabla por posición), el botón aquí navega directo por conocimiento_id —
+    estas tarjetas muestran un subconjunto en un orden distinto al de la
+    tabla, así que un índice posicional apuntaría a la fila equivocada."""
+    pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
+    hijos = [
+        html.Div(className="hal-card-head", children=[
+            html.Span(row["estado"], className="status-pill",
+                       style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
+            html.Span(row["categoria"], className="hal-card-motor"),
+        ]),
+        html.Div(row["titulo"], className="hal-card-desc"),
+    ]
+    if mostrar_progreso and row.get("progreso") is not None:
+        hijos.append(dbc.Progress(value=row["progreso"], label=f"{row['progreso']}%",
+                                    className="mb-2", style={"height": "0.6rem"}))
+    hijos.append(html.Div(className="hal-card-meta-grid", children=[
+        html.Div([html.Span("Proyectos", className="hal-card-meta-label"),
+                   html.Span(row["proyectos"] or "—", className="hal-card-meta-value")]),
+        html.Div([html.Span("Actualizado", className="hal-card-meta-label"),
+                   html.Span(row["fecha_actualizacion_txt"], className="hal-card-meta-value")]),
+    ]))
+    hijos.append(dbc.Button("Continuar estudiando" if mostrar_progreso else "Ver",
+                              id={"type": "con-portada-select", "index": row["conocimiento_id"]},
+                              className="btn-refresh btn-sm-card", size="sm", n_clicks=0))
+    return html.Div(className="hal-card", children=hijos)
+
+
 # --------------------------------------------------------------------------
 # Opciones de filtros / formularios (catálogo real de proyectos)
 # --------------------------------------------------------------------------
@@ -215,6 +282,20 @@ def update_conocimiento_proyecto_options(lookups_json):
     lookups = lookups_from_store(lookups_json)
     opts = [{"label": r["proyecto"], "value": r["proyecto"]} for r in lookups["proyectos"]]
     return opts, opts
+
+
+@dash.callback(
+    Output("con-form-actividades", "options"),
+    Input("store-data", "data"),
+)
+def update_conocimiento_actividad_options(store_json):
+    from data_store import df_from_store
+    df = df_from_store(store_json)
+    if df.empty:
+        return []
+    tabla = df.sort_values("fecha_inicio", ascending=False)
+    return [{"label": f"{r['actividad_id']} — {r['actividad']} ({r['proyecto']})", "value": r["actividad_id"]}
+            for _, r in tabla.iterrows()]
 
 
 # --------------------------------------------------------------------------
@@ -270,6 +351,33 @@ def update_conocimiento(store_json, query, categorias, estados, proyectos):
     cards = [_con_card(i, fila) for i, fila in enumerate(tabla_data)]
 
     return str(total), str(en_estudio), str(aplicado), str(global_n), tabla_data, cards
+
+
+# --------------------------------------------------------------------------
+# Portada: "Estoy estudiando" / "Conocimiento reciente" (independiente de
+# los filtros de abajo — siempre muestra el estado real más reciente).
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("con-estudiando-cards", "children"),
+    Output("con-recientes-cards", "children"),
+    Input("store-conocimiento", "data"),
+)
+def update_conocimiento_portada(store_json):
+    from data_store import knowledge_from_store
+    df = knowledge_from_store(store_json)
+    if df.empty:
+        return [], []
+    df = df.copy()
+    df["fecha_actualizacion_txt"] = df["fecha_actualizacion"].dt.strftime("%d/%m/%Y").fillna("—")
+    df["progreso"] = df["conceptos"].apply(km.progreso_promedio)
+
+    estudiando = (df[df["estado"].isin(["En estudio", "En progreso"])]
+                  .sort_values("fecha_actualizacion", ascending=False).head(6))
+    recientes = df.sort_values("fecha_actualizacion", ascending=False).head(6)
+
+    tarjetas_estudiando = [_con_card_portada(row, mostrar_progreso=True) for _, row in estudiando.iterrows()]
+    tarjetas_recientes = [_con_card_portada(row, mostrar_progreso=False) for _, row in recientes.iterrows()]
+    return tarjetas_estudiando, tarjetas_recientes
 
 
 # --------------------------------------------------------------------------
@@ -352,6 +460,9 @@ def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver):
     Output("con-form-proyectos", "value"),
     Output("con-form-etiquetas", "value"),
     Output("con-form-fuente", "value"),
+    Output("con-form-actividades", "value"),
+    Output("con-form-objetivo", "value"),
+    Output("con-form-conceptos", "value"),
     Output("con-form-modal-title", "children"),
     Input("btn-nuevo-conocimiento", "n_clicks"),
     State("con-clicks-baseline", "data"),
@@ -360,7 +471,7 @@ def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver):
 def abrir_nuevo_conocimiento(n_clicks, baseline):
     umbral = (baseline or {}).get("btn-nuevo-conocimiento", 0)
     if not n_clicks or n_clicks <= umbral:
-        return (dash.no_update,) * 12
+        return (dash.no_update,) * 15
     return (True, None, *_campos_vacios(), "Nuevo conocimiento")
 
 
@@ -376,6 +487,9 @@ def abrir_nuevo_conocimiento(n_clicks, baseline):
     Output("con-form-proyectos", "value", allow_duplicate=True),
     Output("con-form-etiquetas", "value", allow_duplicate=True),
     Output("con-form-fuente", "value", allow_duplicate=True),
+    Output("con-form-actividades", "value", allow_duplicate=True),
+    Output("con-form-objetivo", "value", allow_duplicate=True),
+    Output("con-form-conceptos", "value", allow_duplicate=True),
     Output("con-form-modal-title", "children", allow_duplicate=True),
     Input("btn-editar-conocimiento", "n_clicks"),
     State("store-conocimiento-seleccionado", "data"),
@@ -385,7 +499,7 @@ def abrir_nuevo_conocimiento(n_clicks, baseline):
 )
 def abrir_editar_conocimiento(n_clicks, conocimiento_id, store_json, baseline):
     from data_store import knowledge_from_store
-    vacio = (dash.no_update,) * 12
+    vacio = (dash.no_update,) * 15
     umbral = (baseline or {}).get("btn-editar-conocimiento", 0)
     if not n_clicks or n_clicks <= umbral or not conocimiento_id:
         return vacio
@@ -394,9 +508,15 @@ def abrir_editar_conocimiento(n_clicks, conocimiento_id, store_json, baseline):
     if fila.empty:
         return vacio
     r = fila.iloc[0]
-    proyectos_list = [p.strip() for p in (r["proyectos"] or "").split(",") if p.strip()]
+    proyectos_list = _split_csv(r["proyectos"])
+    actividades_list = _split_csv(r["actividades_relacionadas"])
+    etiquetas_txt = r["etiquetas"] if isinstance(r["etiquetas"], str) else ""
+    fuente_txt = r["fuente"] if isinstance(r["fuente"], str) else ""
+    objetivo_txt = r["objetivo_estudio"] if isinstance(r["objetivo_estudio"], str) else ""
+    conceptos_txt = r["conceptos"] if isinstance(r["conceptos"], str) else ""
     return (True, None, r["titulo"], r["descripcion_breve"], r["contenido"], r["categoria"],
-            r["estado"], r["ambito"], proyectos_list, r["etiquetas"] or "", r["fuente"] or "",
+            r["estado"], r["ambito"], proyectos_list, etiquetas_txt, fuente_txt,
+            actividades_list, objetivo_txt, conceptos_txt,
             f"Editar: {r['titulo']}")
 
 
@@ -427,11 +547,15 @@ def cancelar_conocimiento(_n_clicks):
     State("con-form-proyectos", "value"),
     State("con-form-etiquetas", "value"),
     State("con-form-fuente", "value"),
+    State("con-form-actividades", "value"),
+    State("con-form-objetivo", "value"),
+    State("con-form-conceptos", "value"),
     State("con-form-modal-title", "children"),
     prevent_initial_call=True,
 )
 def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenido, categoria,
-                          estado, ambito, proyectos_list, etiquetas, fuente, modal_title):
+                          estado, ambito, proyectos_list, etiquetas, fuente, actividades_list,
+                          objetivo, conceptos, modal_title):
     from data_store import knowledge_to_store
     if not n_clicks:
         return (dash.no_update,) * 6
@@ -446,6 +570,7 @@ def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenid
         return error("Escribe el contenido.")
 
     proyectos_txt = ", ".join(proyectos_list) if proyectos_list else None
+    actividades_txt = ", ".join(actividades_list) if actividades_list else None
     es_edicion = modal_title and str(modal_title).startswith("Editar:")
 
     if es_edicion:
@@ -455,13 +580,16 @@ def guardar_conocimiento(n_clicks, seleccionado_id, titulo, desc_breve, contenid
             seleccionado_id, titulo=titulo.strip(), descripcion_breve=(desc_breve or "").strip(),
             contenido=contenido.strip(), categoria=categoria, estado=estado, ambito=ambito,
             proyectos=proyectos_txt, etiquetas=(etiquetas or "").strip() or None,
-            fuente=(fuente or "").strip() or None,
+            fuente=(fuente or "").strip() or None, actividades_relacionadas=actividades_txt,
+            objetivo_estudio=(objetivo or "").strip() or None, conceptos=(conceptos or "").strip() or None,
         )
     else:
         ok, msg, _new_id = km.add_knowledge(
             titulo=titulo.strip(), descripcion_breve=(desc_breve or "").strip(), contenido=contenido.strip(),
             categoria=categoria, estado=estado, ambito=ambito, proyectos=proyectos_txt,
             etiquetas=(etiquetas or "").strip() or None, fuente=(fuente or "").strip() or None,
+            actividades_relacionadas=actividades_txt, objetivo_estudio=(objetivo or "").strip() or None,
+            conceptos=(conceptos or "").strip() or None,
         )
     if not ok:
         return error(msg)
@@ -547,21 +675,29 @@ def _accion_ia_boton(label: str, icon: str, prompt_tipo: str) -> dbc.Button:
     Output("con-detalle-body", "children"),
     Input("btn-ver-conocimiento", "n_clicks"),
     Input({"type": "con-archivo-subido", "index": ALL}, "contents"),
+    Input({"type": "con-portada-select", "index": ALL}, "n_clicks"),
     State({"type": "con-archivo-subido", "index": ALL}, "filename"),
     State("store-conocimiento-seleccionado", "data"),
     State("con-clicks-baseline", "data"),
+    State("store-data", "data"),
     prevent_initial_call=True,
 )
-def abrir_detalle_conocimiento(n_clicks, contents_list, filenames_list, conocimiento_id, baseline):
+def abrir_detalle_conocimiento(n_clicks, contents_list, portada_clicks_list, filenames_list,
+                                conocimiento_id, baseline, actividades_json):
     umbral = (baseline or {}).get("btn-ver-conocimiento", 0)
     triggered_id = dash.ctx.triggered_id
     es_por_boton = triggered_id == "btn-ver-conocimiento"
+    es_por_portada = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-portada-select"
     if es_por_boton and (not n_clicks or n_clicks <= umbral):
         return dash.no_update, dash.no_update, dash.no_update
+    if es_por_portada:
+        if not portada_clicks_list or not any(portada_clicks_list):
+            return dash.no_update, dash.no_update, dash.no_update
+        conocimiento_id = triggered_id["index"]
     if not conocimiento_id:
         return dash.no_update, dash.no_update, dash.no_update
 
-    if not es_por_boton and contents_list and any(contents_list):
+    if not es_por_boton and not es_por_portada and contents_list and any(contents_list):
         idx = [i for i, c in enumerate(contents_list) if c][-1]
         contenido_b64 = contents_list[idx]
         filename = filenames_list[idx]
@@ -582,11 +718,64 @@ def abrir_detalle_conocimiento(n_clicks, contents_list, filenames_list, conocimi
         for _, a in archivos.iterrows()
     ]) if not archivos.empty else html.Div("Sin archivos adjuntos.", className="section-caption")
 
+    # ---- Estudio: objetivo, progreso y conceptos ----
+    bloque_estudio = []
+    if isinstance(r["objetivo_estudio"], str) and r["objetivo_estudio"]:
+        bloque_estudio.append(html.Div([html.Span("🎯 ", className="me-1"), r["objetivo_estudio"]],
+                                          className="section-caption mb-2"))
+    conceptos = km.parse_conceptos(r["conceptos"] if isinstance(r["conceptos"], str) else None)
+    if conceptos:
+        progreso = km.progreso_promedio(r["conceptos"])
+        bloque_estudio.append(dbc.Progress(value=progreso, label=f"{progreso}%", className="mb-2"))
+        bloque_estudio.append(html.Div(className="d-flex flex-wrap gap-2 mb-3", children=[
+            html.Span(f"{c['nombre']} · {c['progreso']}%", className="hal-card-motor")
+            for c in conceptos
+        ]))
+
+    # ---- Actividades relacionadas (por actividad_id sobre store-data) ----
+    ids_actividad = _split_csv(r["actividades_relacionadas"])
+    bloque_actividades = html.Div("Ninguna actividad relacionada.", className="section-caption")
+    if ids_actividad:
+        from data_store import df_from_store
+        dfact = df_from_store(actividades_json)
+        relacionadas = dfact[dfact["actividad_id"].isin(ids_actividad)] if not dfact.empty else dfact
+        if not relacionadas.empty:
+            bloque_actividades = html.Div(className="section-caption", children=[
+                html.Div([html.I(className="bi bi-diagram-3 me-1"),
+                           f"{a['actividad']} ({a['proyecto']}, {a['estado']})"])
+                for _, a in relacionadas.iterrows()
+            ])
+
+    # ---- Hallazgos relacionados (texto libre: los hallazgos no tienen ID propio) ----
+    hallazgos_txt = r["hallazgos_relacionados"] if isinstance(r["hallazgos_relacionados"], str) else ""
+    bloque_hallazgos = (html.Div(hallazgos_txt, className="section-caption") if hallazgos_txt else
+                          html.Div("Ningún hallazgo relacionado.", className="section-caption"))
+
+    # ---- Conocimiento relacionado: mismas etiquetas o mismo proyecto (sin embeddings) ----
+    etiquetas_propias = {e.lower() for e in _split_csv(r["etiquetas"])}
+    proyectos_propios = {p.lower() for p in _split_csv(r["proyectos"])}
+
+    def _relacionado(otra) -> bool:
+        etq_otra = {e.lower() for e in _split_csv(otra["etiquetas"])}
+        proy_otra = {p.lower() for p in _split_csv(otra["proyectos"])}
+        return bool(etiquetas_propias & etq_otra) or bool(proyectos_propios & proy_otra)
+
+    otras = df[df["conocimiento_id"] != conocimiento_id]
+    relacionadas_kw = [row for _, row in otras.iterrows() if _relacionado(row)][:5] \
+        if (etiquetas_propias or proyectos_propios) else []
+    bloque_relacionado = html.Div("Sin conocimiento relacionado detectado.", className="section-caption")
+    if relacionadas_kw:
+        bloque_relacionado = html.Div(className="section-caption", children=[
+            html.Div([html.I(className="bi bi-link-45deg me-1"), f"{a['titulo']} ({a['categoria']})"])
+            for a in relacionadas_kw
+        ])
+
     body = html.Div([
         html.Div([badge_conocimiento_estado(r["estado"]),
                    html.Span(r["categoria"], className="hal-card-motor ms-2")],
                   className="d-flex align-items-center gap-2 mb-3"),
         html.Div(r["descripcion_breve"] or "", className="section-caption mb-2"),
+        *bloque_estudio,
         dcc.Markdown(r["contenido"] or "", className="mb-3"),
         html.Div(className="d-flex flex-wrap gap-2 mb-3", children=[
             _accion_ia_boton("Explicarme", "bi bi-mortarboard", "explicar"),
@@ -597,7 +786,13 @@ def abrir_detalle_conocimiento(n_clicks, contents_list, filenames_list, conocimi
             _accion_ia_boton("Ejemplo de código", "bi bi-code-slash", "codigo"),
             _accion_ia_boton("Qué estudiar después", "bi bi-signpost", "siguiente"),
         ]),
-        html.Div("Archivos adjuntos", className="section-title"),
+        html.Div("Actividades relacionadas", className="section-title"),
+        bloque_actividades,
+        html.Div("Hallazgos relacionados", className="section-title mt-2"),
+        bloque_hallazgos,
+        html.Div("Conocimiento relacionado", className="section-title mt-2"),
+        bloque_relacionado,
+        html.Div("Archivos adjuntos", className="section-title mt-2"),
         lista_archivos,
         dcc.Upload(id={"type": "con-archivo-subido", "index": conocimiento_id},
                     children=html.Div(["Arrastra un archivo o ", html.A("selecciónalo")]),

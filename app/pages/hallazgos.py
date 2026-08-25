@@ -16,8 +16,9 @@ from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import charts
 import data as data_mod
+import knowledge as km
 from components import chart_card, kpi_card, page_header
-from data_store import hallazgos_from_store, hallazgos_to_store, lookups_from_store
+from data_store import hallazgos_from_store, hallazgos_to_store, knowledge_to_store, lookups_from_store
 from theme import GRID, HALLAZGO_ESTADO_PILL, INK_MUTED, INK_PRIMARY
 
 dash.register_page(__name__, path="/hallazgos", name="Hallazgos", title="Hallazgos")
@@ -81,6 +82,8 @@ layout = html.Div(className="page", children=[
                         id="btn-editar-hallazgo", className="btn-refresh", disabled=True),
             dbc.Button([html.I(className="bi bi-trash"), "Eliminar"],
                         id="btn-eliminar-hallazgo", className="btn-refresh", disabled=True),
+            dbc.Button([html.I(className="bi bi-mortarboard-fill"), "Convertir en conocimiento"],
+                        id="btn-convertir-conocimiento-hallazgo", className="btn-refresh", disabled=True),
             html.Div(id="hal-selection-msg", className="hal-selection-msg"),
             dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo hallazgo"],
                         id="btn-nuevo-hallazgo", className="btn-refresh ms-auto", n_clicks=0),
@@ -379,6 +382,7 @@ def seleccionar_hallazgo_desde_card(n_clicks_list):
     Output("btn-cerrar-hallazgo", "disabled"),
     Output("btn-editar-hallazgo", "disabled"),
     Output("btn-eliminar-hallazgo", "disabled"),
+    Output("btn-convertir-conocimiento-hallazgo", "disabled"),
     Output("hal-selection-msg", "children"),
     Output("store-hallazgo-seleccionado", "data"),
     Input("hal-tabla", "selected_rows"),
@@ -387,13 +391,13 @@ def seleccionar_hallazgo_desde_card(n_clicks_list):
 def update_hallazgo_selection(selected_rows, table_data):
     selected_rows = selected_rows or []
     if len(selected_rows) == 0:
-        return True, True, True, "Selecciona un hallazgo para continuar.", None
+        return True, True, True, True, "Selecciona un hallazgo para continuar.", None
     if len(selected_rows) > 1:
-        return True, True, True, "Selecciona únicamente un hallazgo para continuar.", None
+        return True, True, True, True, "Selecciona únicamente un hallazgo para continuar.", None
 
     idx = selected_rows[0]
     if not table_data or idx >= len(table_data):
-        return True, True, True, "Selecciona un hallazgo para continuar.", None
+        return True, True, True, True, "Selecciona un hallazgo para continuar.", None
 
     row = table_data[idx]
     seleccionado = {
@@ -403,8 +407,8 @@ def update_hallazgo_selection(selected_rows, table_data):
         "fecha_hallazgo": row.get("fecha_hallazgo_iso"), "fecha_cierre": row.get("fecha_cierre_iso"),
     }
     if row["Estado"] == "Cerrado":
-        return True, False, False, "Este hallazgo ya está cerrado.", seleccionado
-    return False, False, False, "", seleccionado
+        return True, False, False, False, "Este hallazgo ya está cerrado.", seleccionado
+    return False, False, False, False, "", seleccionado
 
 
 def _campo_modal(label: str, value: str) -> html.Div:
@@ -734,6 +738,48 @@ def confirmar_eliminar_hallazgo(n_clicks, seleccionado):
         nuevo_df = data_mod.load_hallazgos()
         return hallazgos_to_store(nuevo_df), False, f"✓ {msg}", "success", True
     return dash.no_update, False, msg, "danger", True
+
+
+# --------------------------------------------------------------------------
+# Convertir en conocimiento: crea una entrada preliminar directo desde el
+# hallazgo seleccionado (mismo patrón que app.py:convertir_actividad_en_
+# conocimiento para actividades) — el usuario la termina de editar en
+# /conocimiento. Los hallazgos no tienen un ID propio (se identifican por
+# la clave compuesta motor/script/función/descripción), así que
+# 'hallazgos_relacionados' se guarda como un descriptor de texto, no un ID.
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("store-conocimiento", "data", allow_duplicate=True),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
+    Input("btn-convertir-conocimiento-hallazgo", "n_clicks"),
+    State("store-hallazgo-seleccionado", "data"),
+    prevent_initial_call=True,
+)
+def convertir_hallazgo_en_conocimiento(n_clicks, seleccionado):
+    if not n_clicks:
+        return (dash.no_update,) * 4
+    if not seleccionado:
+        return dash.no_update, "No hay ningún hallazgo seleccionado.", "danger", True
+
+    descriptor = (f"{seleccionado['motor']} / {seleccionado['script']} / "
+                   f"{seleccionado['funcion']}: {seleccionado['descripcion']}")
+    contenido = f"**Descripción del hallazgo:** {seleccionado['descripcion']}"
+
+    ok, msg, _new_id = km.add_knowledge(
+        titulo=f"{seleccionado['motor']}: {seleccionado['descripcion'][:80]}",
+        descripcion_breve=f"Script {seleccionado['script']}, función {seleccionado['funcion']}",
+        contenido=contenido, categoria="Errores y aprendizajes", estado="Pendiente de revisar",
+        ambito="Proyecto", proyectos=seleccionado["proyecto"], etiquetas=None, fuente=None,
+        hallazgos_relacionados=descriptor,
+    )
+    if not ok:
+        return dash.no_update, msg, "danger", True
+
+    nuevo_df = km.load_knowledge()
+    return (knowledge_to_store(nuevo_df), f"✓ {msg} Puedes terminar de editarla en Conocimiento.",
+            "success", True)
 
 
 # --------------------------------------------------------------------------

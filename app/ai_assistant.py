@@ -79,7 +79,15 @@ SYSTEM_PROMPT = (
     "dilo explícitamente en vez de adivinar. Responde en español, de forma "
     "clara y concisa. Cuando el usuario pida un mapa conceptual, respóndelo "
     "como un bloque de código ```mermaid ... ``` con sintaxis válida de "
-    "Mermaid (graph TD u otra), sin explicaciones adicionales dentro del bloque."
+    "Mermaid (graph TD u otra), sin explicaciones adicionales dentro del bloque. "
+    "Diferencia siempre entre datos confirmados y tu propio razonamiento: cuando "
+    "cites información real obtenida con una herramienta, dilo con frases como "
+    "'Según tus registros...'; cuando hagas una inferencia o interpretación "
+    "propia en vez de citar un dato exacto, acláralo con 'Mi interpretación "
+    "es...'; y cuando no encuentres información registrada sobre algo (en "
+    "especial sobre un proyecto de trabajo específico), dilo explícitamente con "
+    "'No encuentro esa información registrada en Seguimiento' en vez de "
+    "inventar arquitectura, decisiones o datos de ese proyecto."
 )
 
 
@@ -222,7 +230,11 @@ TOOL_FUNCTIONS = {
 # llamador cae al flujo de OpenAI (nunca se fuerza una respuesta local
 # dudosa por ahorrar costo).
 # --------------------------------------------------------------------------
-def _extraer_proyecto(texto: str) -> str | None:
+def _extraer_proyecto(texto: str, default: str | None = None) -> str | None:
+    """Busca un proyecto mencionado explícitamente en el texto del usuario.
+    Si no encuentra ninguno, cae al 'default' — usado para el contexto de
+    proyecto elegido en la interfaz del Asistente (sección 22/50 del pedido:
+    una mención explícita del usuario siempre gana sobre el contexto)."""
     proyectos = data_mod.load_data()["proyectos"]["proyecto"].dropna().tolist()
     t = texto.lower()
     for p in proyectos:
@@ -230,7 +242,7 @@ def _extraer_proyecto(texto: str) -> str | None:
             return p
     if "transversal" in t:
         return "Transversal"
-    return None
+    return default
 
 
 def _extraer_dias(texto: str) -> int | None:
@@ -248,8 +260,8 @@ def _ventana_txt(dias: int | None) -> str:
     return {1: " hoy", 7: " esta semana", 30: " este mes"}.get(dias, "")
 
 
-def _resp_horas(texto: str) -> tuple[str, str]:
-    proyecto = _extraer_proyecto(texto)
+def _resp_horas(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto, default=proyecto_contexto)
     dias = _extraer_dias(texto)
     r = _tool_get_hours_by_project(proyecto=proyecto, dias=dias)
     horas = r["horas_por_proyecto"]
@@ -263,8 +275,8 @@ def _resp_horas(texto: str) -> tuple[str, str]:
     return f"Horas registradas{ventana}: {partes}.", "local"
 
 
-def _resp_pendientes(texto: str) -> tuple[str, str]:
-    proyecto = _extraer_proyecto(texto)
+def _resp_pendientes(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto, default=proyecto_contexto)
     items = _tool_get_pending_tasks(proyecto=proyecto)["pendientes"]
     extra = f" en {proyecto}" if proyecto else ""
     if not items:
@@ -274,8 +286,8 @@ def _resp_pendientes(texto: str) -> tuple[str, str]:
     return f"Tienes {len(items)} pendiente(s){extra}:\n\n{lineas}", "local"
 
 
-def _resp_bloqueos(texto: str) -> tuple[str, str]:
-    proyecto = _extraer_proyecto(texto)
+def _resp_bloqueos(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto, default=proyecto_contexto)
     items = _tool_get_blockers(proyecto=proyecto)["bloqueos"]
     extra = f" en {proyecto}" if proyecto else ""
     if not items:
@@ -290,17 +302,19 @@ def _resp_proyectos(_texto: str) -> tuple[str, str]:
     return f"Tus proyectos registrados son: {', '.join(proyectos)}.", "local"
 
 
-def _resp_actividades_recientes(texto: str) -> tuple[str, str]:
-    items = _tool_get_activities(dias=_extraer_dias(texto) or 14)["actividades"][:5]
+def _resp_actividades_recientes(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto, default=proyecto_contexto)
+    items = _tool_get_activities(proyecto=proyecto, dias=_extraer_dias(texto) or 14)["actividades"][:5]
+    extra = f" en {proyecto}" if proyecto else ""
     if not items:
-        return "No encontré actividades recientes.", "local"
+        return f"No encontré actividades recientes{extra}.", "local"
     lineas = "\n".join(f"- **{i['actividad']}** ({i['proyecto']}, {i['fecha_inicio']}, {i['estado']})"
                         for i in items)
-    return f"Tus actividades más recientes:\n\n{lineas}", "local"
+    return f"Tus actividades más recientes{extra}:\n\n{lineas}", "local"
 
 
-def _resp_conteo_actividades(texto: str) -> tuple[str, str]:
-    proyecto = _extraer_proyecto(texto)
+def _resp_conteo_actividades(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto, default=proyecto_contexto)
     dias = _extraer_dias(texto)
     df = data_mod.load_data()["actividades"]
     if proyecto:
@@ -386,7 +400,7 @@ _PATRON_RECIENTES = re.compile(r"actividad(es)?\s+(m[aá]s\s+)?recient", re.IGNO
 _PATRON_CONTEO_ACTIVIDADES = re.compile(r"cu[aá]ntas?\s+actividades", re.IGNORECASE)
 
 
-def _clasificar_consulta(texto: str) -> tuple[str, str] | None:
+def _clasificar_consulta(texto: str, proyecto_contexto: str | None = None) -> tuple[str, str] | None:
     t = texto.strip()
 
     m_mapa = _PATRON_MAPA.search(t)
@@ -403,17 +417,17 @@ def _clasificar_consulta(texto: str) -> tuple[str, str] | None:
             return resultado
 
     if _PATRON_HORAS.search(t):
-        return _resp_horas(t)
+        return _resp_horas(t, proyecto_contexto)
     if _PATRON_PENDIENTES.search(t):
-        return _resp_pendientes(t)
+        return _resp_pendientes(t, proyecto_contexto)
     if _PATRON_BLOQUEOS.search(t):
-        return _resp_bloqueos(t)
+        return _resp_bloqueos(t, proyecto_contexto)
     if _PATRON_PROYECTOS.search(t):
         return _resp_proyectos(t)
     if _PATRON_RECIENTES.search(t):
-        return _resp_actividades_recientes(t)
+        return _resp_actividades_recientes(t, proyecto_contexto)
     if _PATRON_CONTEO_ACTIVIDADES.search(t):
-        return _resp_conteo_actividades(t)
+        return _resp_conteo_actividades(t, proyecto_contexto)
 
     return None
 
@@ -682,11 +696,16 @@ def _responder_con_openai(mensajes_previos: list[dict], contenido_usuario: str) 
 # Punto de entrada público — router primero, OpenAI solo si hace falta.
 # --------------------------------------------------------------------------
 def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
-                    contexto_extra: str | None = None) -> tuple[bool, str, str]:
+                    contexto_extra: str | None = None,
+                    proyecto_contexto: str | None = None) -> tuple[bool, str, str]:
     """Devuelve (ok, texto_de_respuesta_o_error, fuente). fuente es "local",
     "conocimiento", "ia", "ia_cache" o "sistema" (config/presupuesto/error).
     contexto_extra es para prompts armados desde una entrada de conocimiento
-    (ej. el botón "Explicarme" de /conocimiento)."""
+    (ej. el botón "Explicarme" de /conocimiento). proyecto_contexto es el
+    proyecto elegido en el selector de contexto del Asistente: se usa como
+    proyecto por defecto (tanto en el router como al llamar a OpenAI) solo
+    cuando el propio texto del usuario no menciona otro proyecto — una
+    mención explícita siempre gana sobre el contexto de la interfaz."""
     if not is_configured():
         return False, ("El asistente no está activado todavía: falta configurar "
                         "OPENAI_API_KEY en las variables de entorno."), "sistema"
@@ -694,7 +713,7 @@ def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
     contenido_usuario = f"{mensaje_usuario}\n\n{contexto_extra}" if contexto_extra else mensaje_usuario
     t_inicio = dt.datetime.now()
 
-    ruta_local = _clasificar_consulta(contenido_usuario)
+    ruta_local = _clasificar_consulta(contenido_usuario, proyecto_contexto=proyecto_contexto)
     if ruta_local:
         texto, fuente = ruta_local
         duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
@@ -716,7 +735,16 @@ def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
         _guardar_intercambio(conversacion_id, mensaje_usuario, texto, "sistema")
         return False, texto, "sistema"
 
-    cacheado = _cache_get("mensaje", contenido_usuario)
+    contenido_para_ia = contenido_usuario
+    if proyecto_contexto:
+        contenido_para_ia = (
+            f"[Contexto de la interfaz: el usuario está viendo el proyecto '{proyecto_contexto}' "
+            f"en Seguimiento. Si su pregunta no menciona otro proyecto explícitamente, prioriza "
+            f"información de este proyecto; no mezcles otros proyectos salvo que él lo pida.]\n\n"
+            f"{contenido_usuario}"
+        )
+
+    cacheado = _cache_get("mensaje", contenido_para_ia)
     if cacheado:
         duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
         _registrar_uso("ia_cache", None, 0, 0, 0.0, duracion_ms, True)
@@ -724,7 +752,7 @@ def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
         return True, cacheado, "ia_cache"
 
     historial = _cargar_conversacion(conversacion_id)
-    ok, texto, modelo, uso = _responder_con_openai(historial.get("mensajes", []), contenido_usuario)
+    ok, texto, modelo, uso = _responder_con_openai(historial.get("mensajes", []), contenido_para_ia)
     duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
 
     if not ok:
@@ -733,6 +761,6 @@ def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
 
     costo = _estimar_costo(modelo, uso["input_tokens"], uso["output_tokens"], uso["cached_tokens"])
     _registrar_uso("ia", modelo, uso["input_tokens"], uso["output_tokens"], costo, duracion_ms, True)
-    _cache_set("mensaje", contenido_usuario, texto, modelo)
+    _cache_set("mensaje", contenido_para_ia, texto, modelo)
     _guardar_intercambio(conversacion_id, mensaje_usuario, texto, "ia")
     return True, texto, "ia"

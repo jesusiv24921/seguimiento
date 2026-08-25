@@ -22,7 +22,8 @@ KNOWLEDGE_SHEET = "CONOCIMIENTO"
 KNOWLEDGE_COLUMNS = [
     "conocimiento_id", "titulo", "descripcion_breve", "contenido", "categoria",
     "estado", "ambito", "proyectos", "etiquetas", "fuente",
-    "actividades_relacionadas", "fecha_creacion", "fecha_actualizacion",
+    "actividades_relacionadas", "hallazgos_relacionados", "conceptos", "objetivo_estudio",
+    "fecha_creacion", "fecha_actualizacion",
 ]
 KNOWLEDGE_DATE_COLS = ["fecha_creacion", "fecha_actualizacion"]
 
@@ -43,6 +44,35 @@ ARCHIVOS_DIR = data_mod.EXCEL_PATH.parent / "conocimiento_archivos"
 
 def _ensure_archivos_dir() -> None:
     ARCHIVOS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def parse_conceptos(texto: str | None) -> list[dict]:
+    """Convierte el texto libre del campo 'conceptos' (p.ej.
+    'Routing:100, Pydantic:80, Dependency Injection:40') en una lista de
+    {nombre, progreso}. Un concepto sin ':porcentaje' se toma como 0%."""
+    if texto is None or (isinstance(texto, float) and pd.isna(texto)) or not str(texto).strip():
+        return []
+    conceptos = []
+    for parte in str(texto).split(","):
+        parte = parte.strip()
+        if not parte:
+            continue
+        nombre, _, pct_txt = parte.rpartition(":")
+        if not nombre:
+            nombre, pct_txt = parte, ""
+        digitos = re.sub(r"[^\d]", "", pct_txt)
+        pct = max(0, min(100, int(digitos))) if digitos else 0
+        conceptos.append({"nombre": nombre.strip(), "progreso": pct})
+    return conceptos
+
+
+def progreso_promedio(texto: str | None) -> int | None:
+    """Progreso 0-100 promediado entre los conceptos declarados, o None si
+    no hay ninguno (para no confundir '0% real' con 'sin conceptos')."""
+    conceptos = parse_conceptos(texto)
+    if not conceptos:
+        return None
+    return round(sum(c["progreso"] for c in conceptos) / len(conceptos))
 
 
 def load_knowledge(path: Path | str | None = None) -> pd.DataFrame:
@@ -125,6 +155,8 @@ def next_knowledge_id(path: Path | str | None = None) -> str:
 def add_knowledge(titulo: str, descripcion_breve: str, contenido: str, categoria: str,
                    estado: str, ambito: str, proyectos: str | None, etiquetas: str | None,
                    fuente: str | None = None, actividades_relacionadas: str | None = None,
+                   hallazgos_relacionados: str | None = None, conceptos: str | None = None,
+                   objetivo_estudio: str | None = None,
                    path: Path | str | None = None) -> tuple[bool, str, str | None]:
     """Agrega una entrada nueva al final de CONOCIMIENTO. Devuelve también el
     ID generado (K0xx) para poder, por ejemplo, subir un archivo adjunto en el
@@ -146,6 +178,8 @@ def add_knowledge(titulo: str, descripcion_breve: str, contenido: str, categoria
         "contenido": contenido, "categoria": categoria, "estado": estado, "ambito": ambito,
         "proyectos": proyectos or None, "etiquetas": etiquetas or None, "fuente": fuente or None,
         "actividades_relacionadas": actividades_relacionadas or None,
+        "hallazgos_relacionados": hallazgos_relacionados or None,
+        "conceptos": conceptos or None, "objetivo_estudio": objetivo_estudio or None,
         "fecha_creacion": ahora, "fecha_actualizacion": ahora,
     }
     for nombre, valor in valores.items():
@@ -166,6 +200,8 @@ def update_knowledge(conocimiento_id: str, titulo: str, descripcion_breve: str, 
                       categoria: str, estado: str, ambito: str, proyectos: str | None,
                       etiquetas: str | None, fuente: str | None = None,
                       actividades_relacionadas: str | None = None,
+                      hallazgos_relacionados: str | None = None, conceptos: str | None = None,
+                      objetivo_estudio: str | None = None,
                       path: Path | str | None = None) -> tuple[bool, str]:
     path = path if path is not None else data_mod.EXCEL_PATH
     wb, ws, col_idx, error = _abrir_para_escritura(path, "actualizar el conocimiento")
@@ -185,6 +221,8 @@ def update_knowledge(conocimiento_id: str, titulo: str, descripcion_breve: str, 
         "categoria": categoria, "estado": estado, "ambito": ambito,
         "proyectos": proyectos or None, "etiquetas": etiquetas or None, "fuente": fuente or None,
         "actividades_relacionadas": actividades_relacionadas or None,
+        "hallazgos_relacionados": hallazgos_relacionados or None,
+        "conceptos": conceptos or None, "objetivo_estudio": objetivo_estudio or None,
         "fecha_actualizacion": dt.date.today(),
     }
     for nombre, valor in valores.items():

@@ -60,6 +60,13 @@ layout = html.Div(className="page", children=[
             dbc.Button([html.I(className="bi bi-plus-lg"), "Nueva conversación"],
                         id="ast-btn-nueva-conversacion", className="btn-refresh", n_clicks=0),
         ], style={"justifyContent": "space-between", "alignItems": "center", "flexWrap": "wrap"}),
+        html.Div(className="hal-actions-row mt-2", children=[
+            html.Div([html.I(className="bi bi-crosshair"), "Contexto"], className="section-title"),
+            dcc.Dropdown(id="ast-selector-contexto", options=[{"label": "🌎 General", "value": ""}],
+                          value="", clearable=False, style={"minWidth": "220px"}),
+            html.Div("Si preguntas sobre un proyecto sin nombrarlo, el Asistente prioriza este.",
+                      className="section-caption"),
+        ], style={"alignItems": "center", "flexWrap": "wrap"}),
     ]) if ai.is_configured() else None,
 
     chart_card([
@@ -98,6 +105,16 @@ if ai.is_configured():
             return dash.no_update
         conversaciones = ai.listar_conversaciones()
         return [{"label": c["titulo"], "value": c["conversacion_id"]} for c in conversaciones]
+
+    @dash.callback(
+        Output("ast-selector-contexto", "options"),
+        Input("store-lookups", "data"),
+    )
+    def actualizar_opciones_contexto(lookups_json):
+        from data_store import lookups_from_store
+        lookups = lookups_from_store(lookups_json)
+        base = [{"label": "🌎 General", "value": ""}]
+        return base + [{"label": f"📁 {r['proyecto']}", "value": r["proyecto"]} for r in lookups["proyectos"]]
 
     @dash.callback(
         Output("store-conversacion-actual", "data"),
@@ -158,9 +175,10 @@ if ai.is_configured():
         State("ast-input", "value"),
         State("store-conversacion-actual", "data"),
         State("ast-mensajes", "children"),
+        State("ast-selector-contexto", "value"),
         prevent_initial_call=True,
     )
-    def enviar_mensaje(n_clicks, texto, conversacion_id, burbujas_actuales):
+    def enviar_mensaje(n_clicks, texto, conversacion_id, burbujas_actuales, proyecto_contexto):
         if not n_clicks:
             return dash.no_update, dash.no_update, dash.no_update
         if not texto or not texto.strip():
@@ -175,7 +193,8 @@ if ai.is_configured():
         # En ambos casos igual se muestra como burbuja (con su etiqueta de
         # fuente) para que quede claro qué pasó, y el texto se deja en el
         # cuadro de entrada para poder reintentar.
-        ok, respuesta, fuente = ai.enviar_mensaje(conversacion_id, texto.strip())
+        ok, respuesta, fuente = ai.enviar_mensaje(conversacion_id, texto.strip(),
+                                                    proyecto_contexto=(proyecto_contexto or None))
         burbujas_actuales = burbujas_actuales or []
         nuevas = burbujas_actuales + [
             _burbuja({"rol": "user", "contenido": texto.strip()}),

@@ -885,6 +885,21 @@ body {
 }
 .btn-sm-card { font-size: 0.78rem !important; padding: 0.35rem 0.75rem !important; }
 
+/* Portada de Conocimiento: "Estoy estudiando" / "Conocimiento reciente" —
+   grilla de .hal-card visible siempre (a diferencia de .table-mobile-only,
+   que solo se muestra en pantallas angostas). */
+.hal-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 0.9rem;
+    margin-top: 0.4rem;
+}
+.hal-cards-grid:empty::after {
+    content: "Nada por aquí todavía.";
+    color: var(--ink-muted);
+    font-size: 0.85rem;
+}
+
 /* ---------------------------------------------------------------------
    Estados vacíos / de éxito
 --------------------------------------------------------------------- */
