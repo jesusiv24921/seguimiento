@@ -11,9 +11,13 @@ Dos mecanismos de selección conviven a propósito:
   seleccionado -> botones Ver/Editar/Eliminar. Para administración.
 - Click directo en una tarjeta/fila (Estoy estudiando, Conocimiento
   reciente, Explorar) -> {"type": "con-item-select", "index":
-  conocimiento_id} -> abre el panel de detalle directamente, por ID (no por
-  posición, para no apuntar a la fila equivocada si el orden visible no
-  coincide con el de la tabla). Para navegar/consultar.
+  "seccion:conocimiento_id"} -> abre el panel de detalle directamente, por
+  ID (no por posición, para no apuntar a la fila equivocada si el orden
+  visible no coincide con el de la tabla). El prefijo de sección evita que
+  dos tarjetas terminen con el mismo id de Dash (y por lo tanto el mismo
+  atributo `id` en el HTML, inválido) cuando la misma entrada aparece a la
+  vez en más de una sección — algo normal con pocas entradas todavía.
+  Para navegar/consultar.
 """
 from __future__ import annotations
 
@@ -346,9 +350,18 @@ def _con_card_admin(idx: int, row: dict) -> html.Div:
     ])
 
 
-def _con_card(row: dict, mostrar_progreso: bool = False, mostrar_etiquetas: bool = False) -> html.Div:
+def _con_card(row: dict, mostrar_progreso: bool = False, mostrar_etiquetas: bool = False,
+              seccion: str = "explorar") -> html.Div:
     """Tarjeta clickeable por conocimiento_id (Estoy estudiando / Explorar).
-    Usada para navegar directo al panel de detalle."""
+    Usada para navegar directo al panel de detalle.
+
+    `seccion` se antepone al index del id: si la misma entrada aparece a la
+    vez en varias secciones de la página (p.ej. está en "Conocimiento
+    reciente" Y en "Explorar" al mismo tiempo, algo normal con pocas
+    entradas), dos elementos con el MISMO id de Dash terminan siendo dos
+    elementos HTML con el mismo atributo `id` — inválido, y el navegador
+    solo reacciona de forma fiable a uno de los dos. Prefijar por sección
+    garantiza que cada botón tenga un id realmente único en la página."""
     pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
     icono = CONOCIMIENTO_CATEGORIA_ICONO.get(row["categoria"], "bi-journal-text")
     hijos = [
@@ -381,7 +394,7 @@ def _con_card(row: dict, mostrar_progreso: bool = False, mostrar_etiquetas: bool
                    html.Span(_fecha_relativa(row["fecha_actualizacion"]), className="hal-card-meta-value")]),
     ]))
     hijos.append(dbc.Button("Continuar estudiando" if mostrar_progreso else "Ver",
-                              id={"type": "con-item-select", "index": row["conocimiento_id"]},
+                              id={"type": "con-item-select", "index": f"{seccion}:{row['conocimiento_id']}"},
                               className="btn-refresh btn-sm-card", size="sm", n_clicks=0))
     return html.Div(className="hal-card", children=hijos)
 
@@ -389,7 +402,7 @@ def _con_card(row: dict, mostrar_progreso: bool = False, mostrar_etiquetas: bool
 def _con_reciente_row(row: dict) -> html.Div:
     pill = CONOCIMIENTO_ESTADO_PILL.get(row["estado"], {"bg": "#eee", "fg": "#333"})
     return html.Button(className="con-reciente-row", n_clicks=0,
-                         id={"type": "con-item-select", "index": row["conocimiento_id"]}, children=[
+                         id={"type": "con-item-select", "index": f"reciente:{row['conocimiento_id']}"}, children=[
         html.Span(row["estado"], className="status-pill",
                    style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
         html.Div([
@@ -492,7 +505,7 @@ def update_conocimiento(store_json, query, categorias, estados, proyectos):
     tabla_data = tabla[cols].to_dict("records")
     admin_cards = [_con_card_admin(i, fila) for i, fila in enumerate(tabla_data)]
 
-    explorar_cards = [_con_card(row, mostrar_etiquetas=True) for _, row in tabla.iterrows()]
+    explorar_cards = [_con_card(row, mostrar_etiquetas=True, seccion="explorar") for _, row in tabla.iterrows()]
 
     return (str(total_global), str(en_estudio_global), str(aplicado_global), str(soluciones_global),
             str(revisar_global), tabla_data, admin_cards, explorar_cards)
@@ -545,7 +558,7 @@ def update_conocimiento_portada(store_json):
                   .sort_values("fecha_actualizacion", ascending=False).head(6))
     recientes = df.sort_values("fecha_actualizacion", ascending=False).head(6)
 
-    tarjetas_estudiando = [_con_card(row, mostrar_progreso=True) for _, row in estudiando.iterrows()]
+    tarjetas_estudiando = [_con_card(row, mostrar_progreso=True, seccion="estudiando") for _, row in estudiando.iterrows()]
     filas_recientes = [_con_reciente_row(row) for _, row in recientes.iterrows()]
     return tarjetas_estudiando, filas_recientes
 
@@ -1122,7 +1135,10 @@ def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, _n_cer
     if es_por_item:
         if not item_clicks_list or not any(item_clicks_list):
             return dash.no_update, dash.no_update, dash.no_update
-        conocimiento_id = triggered_id["index"]
+        # El index viene como "seccion:conocimiento_id" (ver _con_card /
+        # _con_reciente_row) para que el mismo id nunca se repita si una
+        # misma entrada aparece a la vez en varias secciones de la página.
+        conocimiento_id = triggered_id["index"].split(":", 1)[-1]
     if not conocimiento_id:
         return dash.no_update, dash.no_update, dash.no_update
 
