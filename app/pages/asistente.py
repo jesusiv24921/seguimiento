@@ -17,11 +17,24 @@ from components import chart_card, page_header
 dash.register_page(__name__, path="/asistente", name="Asistente", title="Asistente")
 
 
+_FUENTE_LABELS = {
+    "local": "🟢 Datos de Seguimiento · Sin uso de IA",
+    "conocimiento": "📚 Centro de Conocimiento · Sin uso de IA",
+    "ia": "🤖 Generado con IA",
+    "ia_cache": "🤖 Generado con IA (caché)",
+    "sistema": "⚠️ Aviso del sistema",
+}
+
+
 def _burbuja(mensaje: dict) -> html.Div:
     es_usuario = mensaje.get("rol") == "user"
+    hijos = [dcc.Markdown(mensaje.get("contenido", ""), className="ast-burbuja-texto")]
+    fuente = mensaje.get("fuente")
+    if not es_usuario and fuente in _FUENTE_LABELS:
+        hijos.append(html.Div(_FUENTE_LABELS[fuente], className="ast-burbuja-fuente"))
     return html.Div(
         className=f"ast-burbuja {'ast-burbuja-usuario' if es_usuario else 'ast-burbuja-asistente'}",
-        children=[dcc.Markdown(mensaje.get("contenido", ""), className="ast-burbuja-texto")],
+        children=hijos,
     )
 
 
@@ -47,6 +60,13 @@ layout = html.Div(className="page", children=[
             dbc.Button([html.I(className="bi bi-plus-lg"), "Nueva conversación"],
                         id="ast-btn-nueva-conversacion", className="btn-refresh", n_clicks=0),
         ], style={"justifyContent": "space-between", "alignItems": "center", "flexWrap": "wrap"}),
+    ]) if ai.is_configured() else None,
+
+    chart_card([
+        html.Div([html.I(className="bi bi-graph-up"), "Consumo de IA"], className="section-title"),
+        html.Div("Estimado por Seguimiento a partir del uso registrado — no es el saldo real de tu "
+                  "cuenta de OpenAI, que solo puedes ver en platform.openai.com.", className="section-caption"),
+        html.Div(id="ast-consumo-resumen"),
     ]) if ai.is_configured() else None,
 
     chart_card([
@@ -139,17 +159,51 @@ if ai.is_configured():
         if not conversacion_id:
             conversacion_id = ai.nueva_conversacion_id()
 
-        ok, respuesta = ai.enviar_mensaje(conversacion_id, texto.strip())
+        # El router de ai_assistant.py intenta responder sin OpenAI primero
+        # (ok siempre es True para esas rutas); ok=False solo ocurre por un
+        # bloqueo de presupuesto/límite diario o un error real de conexión.
+        # En ambos casos igual se muestra como burbuja (con su etiqueta de
+        # fuente) para que quede claro qué pasó, y el texto se deja en el
+        # cuadro de entrada para poder reintentar.
+        ok, respuesta, fuente = ai.enviar_mensaje(conversacion_id, texto.strip())
         burbujas_actuales = burbujas_actuales or []
-        if not ok:
-            return burbujas_actuales, texto, html.Div(
-                respuesta, className="section-caption", style={"color": "#a52323"})
-
         nuevas = burbujas_actuales + [
             _burbuja({"rol": "user", "contenido": texto.strip()}),
-            _burbuja({"rol": "assistant", "contenido": respuesta}),
+            _burbuja({"rol": "assistant", "contenido": respuesta, "fuente": fuente}),
         ]
-        return nuevas, "", None
+        return nuevas, ("" if ok else texto), None
+
+    @dash.callback(
+        Output("ast-consumo-resumen", "children"),
+        Input("url", "pathname"),
+        Input("ast-mensajes", "children"),
+    )
+    def actualizar_consumo(_pathname, _mensajes):
+        r = ai.resumen_consumo_mes()
+        pct = min(r["porcentaje_usado"], 100)
+        if pct < 80:
+            color = "var(--good)"
+        elif pct < 100:
+            color = "var(--warning)"
+        else:
+            color = "var(--critical)"
+        return html.Div([
+            html.Div(className="ast-consumo-stats", children=[
+                html.Div([html.Div(str(r["consultas_ia"]), className="kpi-value"),
+                           html.Div("Consultas con IA", className="kpi-label")]),
+                html.Div([html.Div(str(r["consultas_locales"]), className="kpi-value"),
+                           html.Div("Resueltas sin IA", className="kpi-label")]),
+                html.Div([html.Div(f"{r['tokens_totales']:,}", className="kpi-value"),
+                           html.Div("Tokens usados", className="kpi-label")]),
+                html.Div([html.Div(f"${r['costo_estimado_usd']:.2f}", className="kpi-value"),
+                           html.Div("Costo estimado", className="kpi-label")]),
+            ]),
+            html.Div(className="ast-budget-bar-track", children=[
+                html.Div(className="ast-budget-bar-fill", style={"width": f"{pct}%", "backgroundColor": color}),
+            ]),
+            html.Div(f"${r['costo_estimado_usd']:.2f} de ${r['presupuesto_usd']:.2f} "
+                      f"presupuestados este mes ({r['porcentaje_usado']:.1f}%)", className="section-caption"),
+        ])
 
     # Los mapas conceptuales que pide el asistente vienen como bloque
     # ```mermaid dentro del Markdown de la respuesta; dcc.Markdown los

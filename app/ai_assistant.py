@@ -1,20 +1,28 @@
 """
-Asistente IA de Seguimiento — capa delgada sobre la Responses API de OpenAI.
+Asistente IA de Seguimiento — capa delgada sobre la Responses API de OpenAI,
+con un router determinístico que responde localmente siempre que sea posible.
 
 Solo se importa/ejecuta desde callbacks server-side de Dash. OPENAI_API_KEY
 nunca se envía al cliente, nunca se guarda en el Excel ni en un dcc.Store.
 
-Las "tools" que el modelo puede invocar son envoltorios delgados sobre
-funciones que ya existen en data.py/knowledge.py — el asistente consulta datos
-reales del Excel, nunca inventa cifras ni hechos.
+Principio de diseño (pedido explícito del usuario): "consultar primero los
+datos y conocimientos locales de Seguimiento; usar OpenAI únicamente cuando
+aporte valor real". Por eso enviar_mensaje() intenta responder con
+_clasificar_consulta() (regex/keywords, sin IA, cero costo) ANTES de
+considerar siquiera llamar a OpenAI. El router nunca usa IA para decidir si
+debe usar IA — es lógica determinística pura.
 
 El historial de conversaciones se guarda como un archivo JSON por
-conversación en conversaciones/ (mismo disco donde vive seguimiento.xlsx) —
-no se introduce ninguna base de datos nueva para esto.
+conversación en conversaciones/ (mismo disco donde vive seguimiento.xlsx).
+El consumo de IA se registra en ai_usage.jsonl (log de solo-anexar, una
+línea por evento — evita reabrir/regrabar el Excel completo en cada mensaje).
+La caché de respuestas de IA vive en cache_ia.json. Ninguno de los tres
+introduce una base de datos nueva: son archivos en el mismo disco.
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -27,14 +35,37 @@ import knowledge as knowledge_mod
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # gpt-5.6-luna: variante económica de la familia GPT-5.6 (verificado ago-2026
-# en la documentación oficial de OpenAI). Cambiar aquí solo el valor por
-# defecto — el usuario puede sobreescribirlo con la variable de entorno
-# OPENAI_MODEL sin tocar código.
+# en la documentación oficial de OpenAI) — modelo por defecto para tareas
+# simples (explicar/resumir/ejercicios). gpt-5.6-terra: variante intermedia,
+# solo para consultas que el router detecte como análisis complejo. Ninguno
+# de los dos queda fijo en el código: ambos son sobreescribibles por
+# variable de entorno sin tocar nada.
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
+OPENAI_REASONING_MODEL = os.environ.get("OPENAI_REASONING_MODEL", "gpt-5.6-terra")
 MAX_TOOL_TURNS = 6
 _REQUEST_TIMEOUT = 30.0
 
+AI_MAX_OUTPUT_TOKENS = int(os.environ.get("AI_MAX_OUTPUT_TOKENS", "800"))
+AI_MONTHLY_BUDGET_USD = float(os.environ.get("AI_MONTHLY_BUDGET_USD", "5.0"))
+AI_DAILY_REQUEST_LIMIT = int(os.environ.get("AI_DAILY_REQUEST_LIMIT", "50"))
+
 CONVERSACIONES_DIR = data_mod.EXCEL_PATH.parent / "conversaciones"
+USAGE_LOG_PATH = data_mod.EXCEL_PATH.parent / "ai_usage.jsonl"
+CACHE_PATH = data_mod.EXCEL_PATH.parent / "cache_ia.json"
+
+# Precios oficiales por 1M de tokens, verificados ago-2026. Sobreescribibles
+# sin tocar código vía AI_PRICING_CONFIG_JSON (los precios de OpenAI cambian
+# con el tiempo — estos son el valor por defecto, no una promesa de precio).
+_DEFAULT_PRICING = {
+    "gpt-5.6-luna":  {"input": 0.20, "cached_input": 0.02, "output": 1.20},
+    "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "output": 12.00},
+    "gpt-5.6-sol":   {"input": 4.00, "cached_input": 0.40, "output": 20.00},
+}
+try:
+    _pricing_override = json.loads(os.environ.get("AI_PRICING_CONFIG_JSON", "{}"))
+except json.JSONDecodeError:
+    _pricing_override = {}
+AI_PRICING_CONFIG = {**_DEFAULT_PRICING, **_pricing_override}
 
 SYSTEM_PROMPT = (
     "Eres el asistente personal dentro de Seguimiento, la aplicación de "
@@ -57,7 +88,9 @@ def is_configured() -> bool:
 
 
 # --------------------------------------------------------------------------
-# Herramientas (function calling) — envoltorios sobre data.py / knowledge.py
+# Herramientas (function calling) — envoltorios sobre data.py / knowledge.py.
+# El router local (más abajo) llama estas mismas funciones directamente en
+# Python, sin pasar por OpenAI, para las consultas que no necesitan IA.
 # --------------------------------------------------------------------------
 def _tool_get_projects(**_kwargs) -> dict:
     df = data_mod.load_data()["proyectos"]
@@ -183,6 +216,339 @@ TOOL_FUNCTIONS = {
 
 
 # --------------------------------------------------------------------------
+# Router determinístico: intenta responder SIN OpenAI. Nunca usa IA para
+# decidir — solo regex/keywords sobre las mismas funciones-herramienta de
+# arriba. Si ningún patrón matchea con confianza, devuelve None y el
+# llamador cae al flujo de OpenAI (nunca se fuerza una respuesta local
+# dudosa por ahorrar costo).
+# --------------------------------------------------------------------------
+def _extraer_proyecto(texto: str) -> str | None:
+    proyectos = data_mod.load_data()["proyectos"]["proyecto"].dropna().tolist()
+    t = texto.lower()
+    for p in proyectos:
+        if p.lower() in t:
+            return p
+    if "transversal" in t:
+        return "Transversal"
+    return None
+
+
+def _extraer_dias(texto: str) -> int | None:
+    t = texto.lower()
+    if "hoy" in t:
+        return 1
+    if "esta semana" in t:
+        return 7
+    if "este mes" in t:
+        return 30
+    return None
+
+
+def _ventana_txt(dias: int | None) -> str:
+    return {1: " hoy", 7: " esta semana", 30: " este mes"}.get(dias, "")
+
+
+def _resp_horas(texto: str) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto)
+    dias = _extraer_dias(texto)
+    r = _tool_get_hours_by_project(proyecto=proyecto, dias=dias)
+    horas = r["horas_por_proyecto"]
+    ventana = _ventana_txt(dias)
+    if proyecto:
+        total = horas.get(proyecto, 0.0)
+        return f"Has registrado {total:.1f} horas en {proyecto}{ventana}.", "local"
+    if not horas:
+        return f"No encontré actividades con horas registradas{ventana}.", "local"
+    partes = "; ".join(f"{p}: {h:.1f} h" for p, h in horas.items())
+    return f"Horas registradas{ventana}: {partes}.", "local"
+
+
+def _resp_pendientes(texto: str) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto)
+    items = _tool_get_pending_tasks(proyecto=proyecto)["pendientes"]
+    extra = f" en {proyecto}" if proyecto else ""
+    if not items:
+        return f"No tienes actividades pendientes{extra}.", "local"
+    lineas = "\n".join(f"- **{i['actividad']}** ({i['proyecto']}, {i['fecha_inicio']}, "
+                        f"prioridad {i['prioridad']})" for i in items)
+    return f"Tienes {len(items)} pendiente(s){extra}:\n\n{lineas}", "local"
+
+
+def _resp_bloqueos(texto: str) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto)
+    items = _tool_get_blockers(proyecto=proyecto)["bloqueos"]
+    extra = f" en {proyecto}" if proyecto else ""
+    if not items:
+        return f"No tienes bloqueos activos{extra}.", "local"
+    lineas = "\n".join(f"- **{i['actividad']}** ({i['proyecto']}, {i['fecha_inicio']}): {i['resultado']}"
+                        for i in items)
+    return f"Tienes {len(items)} bloqueo(s){extra}:\n\n{lineas}", "local"
+
+
+def _resp_proyectos(_texto: str) -> tuple[str, str]:
+    proyectos = _tool_get_projects()["proyectos"]
+    return f"Tus proyectos registrados son: {', '.join(proyectos)}.", "local"
+
+
+def _resp_actividades_recientes(texto: str) -> tuple[str, str]:
+    items = _tool_get_activities(dias=_extraer_dias(texto) or 14)["actividades"][:5]
+    if not items:
+        return "No encontré actividades recientes.", "local"
+    lineas = "\n".join(f"- **{i['actividad']}** ({i['proyecto']}, {i['fecha_inicio']}, {i['estado']})"
+                        for i in items)
+    return f"Tus actividades más recientes:\n\n{lineas}", "local"
+
+
+def _resp_conteo_actividades(texto: str) -> tuple[str, str]:
+    proyecto = _extraer_proyecto(texto)
+    dias = _extraer_dias(texto)
+    df = data_mod.load_data()["actividades"]
+    if proyecto:
+        df = df[df["proyecto"] == proyecto]
+    if dias:
+        limite = dt.date.today() - dt.timedelta(days=dias)
+        df = df[df["fecha_inicio"].dt.date >= limite]
+    completadas = int(df["estado"].eq("Completado").sum())
+    extra = f" en {proyecto}" if proyecto else ""
+    return (f"Tienes {len(df)} actividad(es) registradas{extra}{_ventana_txt(dias)}, "
+            f"de las cuales {completadas} están completadas."), "local"
+
+
+def _resp_conocimiento(tema: str) -> tuple[str, str] | None:
+    items = _tool_search_knowledge(query=tema)["resultados"]
+    if not items:
+        return None  # sin resultados locales: puede que valga la pena preguntarle a la IA
+    lineas = "\n".join(f"- **{i['titulo']}** ({i['categoria']}, {i['estado']}): {i['descripcion_breve']}"
+                        for i in items[:8])
+    return f'Esto es lo que tienes guardado sobre "{tema}":\n\n{lineas}', "conocimiento"
+
+
+def _generar_mermaid_estructurado(contenido: str) -> str | None:
+    """Convierte encabezados/listas Markdown en un árbol Mermaid
+    determinístico. Devuelve None si el contenido no tiene suficiente
+    estructura — en ese caso sí vale la pena que la IA interprete las
+    relaciones conceptuales de un texto en prosa."""
+    nodos: list[tuple[int, str]] = []
+    for linea in contenido.splitlines():
+        if not linea.strip():
+            continue
+        m = re.match(r"^(#{1,4})\s+(.+)", linea)
+        if m:
+            nodos.append((len(m.group(1)), m.group(2).strip()))
+            continue
+        m2 = re.match(r"^\s*[-*]\s+(.+)", linea)
+        if m2 and nodos:
+            nodos.append((nodos[-1][0] + 1, m2.group(1).strip()))
+
+    if len(nodos) < 3:
+        return None
+
+    mermaid = ["graph TD"]
+    pila: list[tuple[int, str]] = []
+    for i, (nivel, texto) in enumerate(nodos):
+        nid = f"n{i}"
+        texto_limpio = re.sub(r'["\n]', " ", texto)[:60]
+        mermaid.append(f'    {nid}["{texto_limpio}"]')
+        while pila and pila[-1][0] >= nivel:
+            pila.pop()
+        if pila:
+            mermaid.append(f"    {pila[-1][1]} --> {nid}")
+        pila.append((nivel, nid))
+    return "\n".join(mermaid)
+
+
+_PATRON_MAPA_TITULO_CONTENIDO = re.compile(r"\*\*(.+?)\*\*\n\n(.+)", re.DOTALL)
+
+
+def _resp_mapa(texto: str) -> tuple[str, str] | None:
+    m = _PATRON_MAPA_TITULO_CONTENIDO.search(texto)
+    if not m:
+        return None
+    titulo, contenido = m.group(1), m.group(2)
+    mermaid = _generar_mermaid_estructurado(contenido)
+    if not mermaid:
+        return None
+    respuesta = (f"Mapa conceptual de **{titulo}** (generado directo de la estructura "
+                  f"guardada, sin usar IA):\n\n```mermaid\n{mermaid}\n```")
+    return respuesta, "local"
+
+
+_PATRON_CONOCIMIENTO = re.compile(
+    r"qu[eé] tengo (?:estudiado|guardado|aprendido)(?:\s+sobre|\s+de)?\s+(.+?)[\?\.]?$",
+    re.IGNORECASE,
+)
+_PATRON_MAPA = re.compile(r"mapa\s+conceptual", re.IGNORECASE)
+_PATRON_HORAS = re.compile(r"cu[aá]ntas?\s+horas|horas\s+(dedi|traba|registr)", re.IGNORECASE)
+_PATRON_PENDIENTES = re.compile(r"pendient", re.IGNORECASE)
+_PATRON_BLOQUEOS = re.compile(r"bloque", re.IGNORECASE)
+_PATRON_PROYECTOS = re.compile(r"qu[eé]\s+proyectos|proyectos\s+activ", re.IGNORECASE)
+_PATRON_RECIENTES = re.compile(r"actividad(es)?\s+(m[aá]s\s+)?recient", re.IGNORECASE)
+_PATRON_CONTEO_ACTIVIDADES = re.compile(r"cu[aá]ntas?\s+actividades", re.IGNORECASE)
+
+
+def _clasificar_consulta(texto: str) -> tuple[str, str] | None:
+    t = texto.strip()
+
+    m_mapa = _PATRON_MAPA.search(t)
+    if m_mapa:
+        resultado = _resp_mapa(t)
+        if resultado:
+            return resultado
+        # sin estructura suficiente -> cae a OpenAI (return None más abajo)
+
+    m_con = _PATRON_CONOCIMIENTO.search(t)
+    if m_con:
+        resultado = _resp_conocimiento(m_con.group(1).strip())
+        if resultado:
+            return resultado
+
+    if _PATRON_HORAS.search(t):
+        return _resp_horas(t)
+    if _PATRON_PENDIENTES.search(t):
+        return _resp_pendientes(t)
+    if _PATRON_BLOQUEOS.search(t):
+        return _resp_bloqueos(t)
+    if _PATRON_PROYECTOS.search(t):
+        return _resp_proyectos(t)
+    if _PATRON_RECIENTES.search(t):
+        return _resp_actividades_recientes(t)
+    if _PATRON_CONTEO_ACTIVIDADES.search(t):
+        return _resp_conteo_actividades(t)
+
+    return None
+
+
+# --------------------------------------------------------------------------
+# Selección de modelo por tipo de tarea
+# --------------------------------------------------------------------------
+_PATRON_ANALISIS_COMPLEJO = re.compile(
+    r"analiza|compara|relaciona.*proyecto|propon(me)?\s+soluc", re.IGNORECASE,
+)
+
+
+def _elegir_modelo(texto: str) -> str:
+    if _PATRON_ANALISIS_COMPLEJO.search(texto):
+        return OPENAI_REASONING_MODEL
+    return OPENAI_MODEL
+
+
+# --------------------------------------------------------------------------
+# Consumo, presupuesto y caché — archivos aparte, nunca tocan el Excel
+# --------------------------------------------------------------------------
+def _estimar_costo(modelo: str | None, input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> float:
+    precios = AI_PRICING_CONFIG.get(modelo or "")
+    if not precios:
+        return 0.0
+    no_cacheados = max(input_tokens - cached_tokens, 0)
+    costo = (
+        no_cacheados / 1_000_000 * precios["input"]
+        + cached_tokens / 1_000_000 * precios.get("cached_input", precios["input"])
+        + output_tokens / 1_000_000 * precios["output"]
+    )
+    return round(costo, 6)
+
+
+def _registrar_uso(tipo: str, modelo: str | None, input_tokens: int, output_tokens: int,
+                    costo: float, duracion_ms: float, exito: bool) -> None:
+    evento = {
+        "fecha": dt.datetime.now().isoformat(), "tipo": tipo, "modelo": modelo,
+        "input_tokens": input_tokens, "output_tokens": output_tokens,
+        "costo_estimado_usd": costo, "duracion_ms": round(duracion_ms), "exito": exito,
+    }
+    try:
+        USAGE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(USAGE_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(evento, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # el registro de consumo nunca debe romper una respuesta real
+
+
+def _leer_eventos_mes(anio_mes: str | None = None) -> list[dict]:
+    anio_mes = anio_mes or dt.date.today().strftime("%Y-%m")
+    if not USAGE_LOG_PATH.exists():
+        return []
+    eventos = []
+    try:
+        with open(USAGE_LOG_PATH, "r", encoding="utf-8") as f:
+            for linea in f:
+                linea = linea.strip()
+                if not linea:
+                    continue
+                try:
+                    ev = json.loads(linea)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("fecha", "").startswith(anio_mes):
+                    eventos.append(ev)
+    except OSError:
+        pass
+    return eventos
+
+
+def resumen_consumo_mes() -> dict:
+    """Consumo ESTIMADO por la app este mes — nunca el saldo real de la
+    cuenta de OpenAI (esta integración no tiene ni debe tener acceso a eso)."""
+    eventos = _leer_eventos_mes()
+    eventos_ia = [e for e in eventos if e.get("tipo") in ("ia", "ia_cache")]
+    costo_total = round(sum(e.get("costo_estimado_usd", 0.0) for e in eventos_ia), 4)
+    tokens_total = sum(e.get("input_tokens", 0) + e.get("output_tokens", 0) for e in eventos_ia)
+    porcentaje = round((costo_total / AI_MONTHLY_BUDGET_USD * 100) if AI_MONTHLY_BUDGET_USD else 0, 1)
+    return {
+        "consultas_ia": len(eventos_ia),
+        "consultas_locales": len([e for e in eventos if e.get("tipo") in ("local", "conocimiento")]),
+        "tokens_totales": tokens_total,
+        "costo_estimado_usd": costo_total,
+        "presupuesto_usd": AI_MONTHLY_BUDGET_USD,
+        "porcentaje_usado": porcentaje,
+    }
+
+
+def _presupuesto_excedido() -> bool:
+    if AI_MONTHLY_BUDGET_USD <= 0:
+        return False
+    return resumen_consumo_mes()["costo_estimado_usd"] >= AI_MONTHLY_BUDGET_USD
+
+
+def _limite_diario_alcanzado() -> bool:
+    if AI_DAILY_REQUEST_LIMIT <= 0:
+        return False
+    hoy = dt.date.today().strftime("%Y-%m-%d")
+    eventos_hoy = [e for e in _leer_eventos_mes() if e.get("fecha", "").startswith(hoy)
+                   and e.get("tipo") in ("ia", "ia_cache")]
+    return len(eventos_hoy) >= AI_DAILY_REQUEST_LIMIT
+
+
+def _cache_key(tipo: str, contenido: str) -> str:
+    return hashlib.sha256(f"{tipo}:{contenido}".encode("utf-8")).hexdigest()
+
+
+def _cache_get(tipo: str, contenido: str) -> str | None:
+    if not CACHE_PATH.exists():
+        return None
+    try:
+        cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    entrada = cache.get(_cache_key(tipo, contenido))
+    return entrada["respuesta"] if entrada else None
+
+
+def _cache_set(tipo: str, contenido: str, respuesta: str, modelo: str) -> None:
+    try:
+        cache = json.loads(CACHE_PATH.read_text(encoding="utf-8")) if CACHE_PATH.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        cache = {}
+    cache[_cache_key(tipo, contenido)] = {
+        "respuesta": respuesta, "modelo": modelo, "fecha": dt.datetime.now().isoformat(),
+    }
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+# --------------------------------------------------------------------------
 # Historial de conversaciones (JSON en disco, un archivo por conversación)
 # --------------------------------------------------------------------------
 def _ensure_conversaciones_dir() -> None:
@@ -210,6 +576,21 @@ def _guardar_conversacion(conversacion_id: str, historial: dict) -> None:
     _ensure_conversaciones_dir()
     path = _conversacion_path(conversacion_id)
     path.write_text(json.dumps(historial, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+
+def _guardar_intercambio(conversacion_id: str, mensaje_usuario: str, respuesta: str, fuente: str) -> None:
+    historial = _cargar_conversacion(conversacion_id)
+    mensajes_previos = historial.get("mensajes", [])
+    ahora = dt.datetime.now().isoformat()
+    mensajes_previos.append({"rol": "user", "contenido": mensaje_usuario, "fecha_hora": ahora})
+    mensajes_previos.append({"rol": "assistant", "contenido": respuesta, "fecha_hora": ahora, "fuente": fuente})
+    historial["mensajes"] = mensajes_previos
+    if not historial.get("titulo"):
+        historial["titulo"] = mensaje_usuario[:60]
+    if not historial.get("fecha_creacion"):
+        historial["fecha_creacion"] = ahora
+    historial["conversacion_id"] = conversacion_id
+    _guardar_conversacion(conversacion_id, historial)
 
 
 def nueva_conversacion_id() -> str:
@@ -243,33 +624,30 @@ def obtener_conversacion(conversacion_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Envío de mensajes (bucle de tool-calling sobre la Responses API)
+# Llamada real a OpenAI (bucle de tool-calling sobre la Responses API) —
+# solo se llega aquí cuando el router determinístico no pudo responder.
 # --------------------------------------------------------------------------
-def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
-                    contexto_extra: str | None = None) -> tuple[bool, str]:
-    """Envía un mensaje del usuario, resuelve las herramientas que el modelo
-    pida, guarda ambos mensajes en el JSON de la conversación, y devuelve
-    (ok, texto_de_respuesta_o_error). contexto_extra es para prompts armados
-    desde una entrada de conocimiento (ej. "Explícame esto: <contenido>")."""
-    if not is_configured():
-        return False, ("El asistente no está activado todavía: falta configurar "
-                        "OPENAI_API_KEY en las variables de entorno.")
-
-    historial = _cargar_conversacion(conversacion_id)
-    mensajes_previos = historial.get("mensajes", [])
-
+def _responder_con_openai(mensajes_previos: list[dict], contenido_usuario: str) -> tuple[bool, str, str, dict]:
+    """Devuelve (ok, texto_o_error, modelo_usado, uso_tokens). No guarda nada
+    — el llamador decide qué hacer con el resultado."""
+    modelo = _elegir_modelo(contenido_usuario)
     input_items: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in mensajes_previos[-20:]:
         input_items.append({"role": m["rol"], "content": m["contenido"]})
-    contenido_usuario = f"{mensaje_usuario}\n\n{contexto_extra}" if contexto_extra else mensaje_usuario
     input_items.append({"role": "user", "content": contenido_usuario})
 
     client = OpenAI(api_key=OPENAI_API_KEY, timeout=_REQUEST_TIMEOUT)
-
     texto = None
+    uso = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
     try:
         for _ in range(MAX_TOOL_TURNS):
-            response = client.responses.create(model=OPENAI_MODEL, input=input_items, tools=TOOLS)
+            response = client.responses.create(
+                model=modelo, input=input_items, tools=TOOLS, max_output_tokens=AI_MAX_OUTPUT_TOKENS,
+            )
+            if response.usage:
+                uso["input_tokens"] += response.usage.input_tokens
+                uso["output_tokens"] += response.usage.output_tokens
+                uso["cached_tokens"] += response.usage.input_tokens_details.cached_tokens
             input_items += [item.model_dump() for item in response.output]
             llamadas = [item for item in response.output if item.type == "function_call"]
             if not llamadas:
@@ -288,19 +666,68 @@ def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
                     "output": json.dumps(resultado, ensure_ascii=False, default=str),
                 })
         if texto is None:
-            return False, "El asistente no pudo completar la respuesta (demasiadas herramientas encadenadas)."
+            return False, "El asistente no pudo completar la respuesta (demasiadas herramientas encadenadas).", modelo, uso
     except Exception as exc:
-        return False, f"No fue posible conectar con OpenAI: {exc}"
+        return False, f"No fue posible conectar con OpenAI: {exc}", modelo, uso
 
-    ahora = dt.datetime.now().isoformat()
-    mensajes_previos.append({"rol": "user", "contenido": mensaje_usuario, "fecha_hora": ahora})
-    mensajes_previos.append({"rol": "assistant", "contenido": texto, "fecha_hora": ahora})
-    historial["mensajes"] = mensajes_previos
-    if not historial.get("titulo"):
-        historial["titulo"] = mensaje_usuario[:60]
-    if not historial.get("fecha_creacion"):
-        historial["fecha_creacion"] = ahora
-    historial["conversacion_id"] = conversacion_id
-    _guardar_conversacion(conversacion_id, historial)
+    return True, texto, modelo, uso
 
-    return True, texto
+
+# --------------------------------------------------------------------------
+# Punto de entrada público — router primero, OpenAI solo si hace falta.
+# --------------------------------------------------------------------------
+def enviar_mensaje(conversacion_id: str, mensaje_usuario: str,
+                    contexto_extra: str | None = None) -> tuple[bool, str, str]:
+    """Devuelve (ok, texto_de_respuesta_o_error, fuente). fuente es "local",
+    "conocimiento", "ia", "ia_cache" o "sistema" (config/presupuesto/error).
+    contexto_extra es para prompts armados desde una entrada de conocimiento
+    (ej. el botón "Explicarme" de /conocimiento)."""
+    if not is_configured():
+        return False, ("El asistente no está activado todavía: falta configurar "
+                        "OPENAI_API_KEY en las variables de entorno."), "sistema"
+
+    contenido_usuario = f"{mensaje_usuario}\n\n{contexto_extra}" if contexto_extra else mensaje_usuario
+    t_inicio = dt.datetime.now()
+
+    ruta_local = _clasificar_consulta(contenido_usuario)
+    if ruta_local:
+        texto, fuente = ruta_local
+        duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
+        _registrar_uso(fuente, None, 0, 0, 0.0, duracion_ms, True)
+        _guardar_intercambio(conversacion_id, mensaje_usuario, texto, fuente)
+        return True, texto, fuente
+
+    if _presupuesto_excedido():
+        texto = (f"⚠️ Se alcanzó el presupuesto configurado para IA este mes "
+                  f"(${AI_MONTHLY_BUDGET_USD:.2f}). Las funciones que no requieren IA "
+                  "siguen disponibles con normalidad.")
+        _registrar_uso("bloqueado", None, 0, 0, 0.0, 0, False)
+        _guardar_intercambio(conversacion_id, mensaje_usuario, texto, "sistema")
+        return False, texto, "sistema"
+
+    if _limite_diario_alcanzado():
+        texto = "Se alcanzó el límite diario de consultas a IA configurado. Vuelve a intentarlo mañana."
+        _registrar_uso("bloqueado", None, 0, 0, 0.0, 0, False)
+        _guardar_intercambio(conversacion_id, mensaje_usuario, texto, "sistema")
+        return False, texto, "sistema"
+
+    cacheado = _cache_get("mensaje", contenido_usuario)
+    if cacheado:
+        duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
+        _registrar_uso("ia_cache", None, 0, 0, 0.0, duracion_ms, True)
+        _guardar_intercambio(conversacion_id, mensaje_usuario, cacheado, "ia_cache")
+        return True, cacheado, "ia_cache"
+
+    historial = _cargar_conversacion(conversacion_id)
+    ok, texto, modelo, uso = _responder_con_openai(historial.get("mensajes", []), contenido_usuario)
+    duracion_ms = (dt.datetime.now() - t_inicio).total_seconds() * 1000
+
+    if not ok:
+        _registrar_uso("ia", modelo, uso["input_tokens"], uso["output_tokens"], 0.0, duracion_ms, False)
+        return False, texto, "sistema"
+
+    costo = _estimar_costo(modelo, uso["input_tokens"], uso["output_tokens"], uso["cached_tokens"])
+    _registrar_uso("ia", modelo, uso["input_tokens"], uso["output_tokens"], costo, duracion_ms, True)
+    _cache_set("mensaje", contenido_usuario, texto, modelo)
+    _guardar_intercambio(conversacion_id, mensaje_usuario, texto, "ia")
+    return True, texto, "ia"
