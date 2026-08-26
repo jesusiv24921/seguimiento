@@ -17,7 +17,7 @@ from dash import ALL, Input, Output, State, dash_table, dcc, html
 import charts
 import data as data_mod
 import knowledge as km
-from components import chart_card, kpi_card, page_header
+from components import badge_hallazgo_estado, badge_proyecto, chart_card, kpi_card, page_header
 from data_store import hallazgos_from_store, hallazgos_to_store, knowledge_to_store, lookups_from_store
 from theme import GRID, HALLAZGO_ESTADO_PILL, INK_MUTED, INK_PRIMARY
 
@@ -28,11 +28,13 @@ layout = html.Div(className="page", children=[
                  "Seguimiento de hallazgos identificados durante la validación de los motores de Sentinel Alerts."),
 
     html.Div([
-        kpi_card("hal-kpi-total", "Hallazgos totales", "bi bi-clipboard-data"),
+        kpi_card("hal-kpi-total", "Hallazgos totales", "bi bi-clipboard-data", context_id="hal-kpi-total-ctx"),
         kpi_card("hal-kpi-abiertos", "Abiertos", "bi bi-exclamation-circle",
-                  icon_id="hal-kpi-abiertos-icon", tone="tone-critical"),
-        kpi_card("hal-kpi-revision", "En revisión", "bi bi-search", tone="tone-warning"),
-        kpi_card("hal-kpi-cerrados", "Cerrados", "bi bi-check2-circle", tone="tone-good"),
+                  icon_id="hal-kpi-abiertos-icon", tone="tone-critical", context_id="hal-kpi-abiertos-ctx"),
+        kpi_card("hal-kpi-revision", "En revisión", "bi bi-search", tone="tone-warning",
+                  context_id="hal-kpi-revision-ctx"),
+        kpi_card("hal-kpi-cerrados", "Cerrados", "bi bi-check2-circle", tone="tone-good",
+                  context_id="hal-kpi-cerrados-ctx"),
         kpi_card("hal-kpi-cierre", "% Cierre", "bi bi-graph-up-arrow"),
     ], className="kpi-grid"),
 
@@ -51,30 +53,36 @@ layout = html.Div(className="page", children=[
 
     html.Div(className="filters-panel", children=[
         html.Div([html.I(className="bi bi-sliders"), "Filtros de hallazgos"], className="filters-panel-title"),
-        html.Div(className="filters-grid", children=[
-            html.Div([
+        dbc.Row([
+            dbc.Col(html.Div([
                 html.Div([html.I(className="bi bi-cpu"), "Motor"], className="filter-label"),
                 dcc.Dropdown(id="hal-f-motor", multi=True, placeholder="Todos"),
-            ], className="filter-field"),
-            html.Div([
+            ], className="filter-field"), md=2),
+            dbc.Col(html.Div([
                 html.Div([html.I(className="bi bi-flag"), "Estado"], className="filter-label"),
                 dcc.Dropdown(id="hal-f-estado", multi=True, placeholder="Todos"),
-            ], className="filter-field"),
-            html.Div([
+            ], className="filter-field"), md=2),
+            dbc.Col(html.Div([
                 html.Div([html.I(className="bi bi-file-earmark-code"), "Script"], className="filter-label"),
                 dcc.Dropdown(id="hal-f-script", multi=True, placeholder="Todos"),
-            ], className="filter-field"),
-            html.Div([
+            ], className="filter-field"), md=2),
+            dbc.Col(html.Div([
                 html.Div([html.I(className="bi bi-code-slash"), "Función"], className="filter-label"),
                 dcc.Dropdown(id="hal-f-funcion", multi=True, placeholder="Todas"),
-            ], className="filter-field"),
-        ]),
+            ], className="filter-field"), md=2),
+            dbc.Col(html.Div([
+                html.Div([html.I(className="bi bi-search"), "Buscar"], className="filter-label"),
+                dbc.Input(id="hal-f-buscar", type="text", debounce=True, placeholder="Buscar en descripción..."),
+            ], className="filter-field"), md=3),
+            dbc.Col(dbc.Button([html.I(className="bi bi-x-circle"), "Limpiar"], id="hal-btn-limpiar-filtros",
+                    className="btn-cal-nav w-100 mt-4"), md=1),
+        ], className="g-2"),
     ]),
 
     chart_card([
         html.Div([html.I(className="bi bi-list-ul"), "Detalle de hallazgos"], className="section-title"),
-        html.Div("Selecciona un hallazgo en la tabla y presiona \"Cerrar hallazgo\" para actualizarlo "
-                  "directamente en el Excel.", className="section-caption"),
+        html.Div("Haz clic en cualquier celda o tarjeta para ver el detalle completo. Selecciona con la "
+                  "casilla para cerrar, editar, eliminar o convertir en conocimiento.", className="section-caption"),
         html.Div(className="hal-actions-row", children=[
             dbc.Button([html.I(className="bi bi-check2-circle"), "Cerrar hallazgo"],
                         id="btn-cerrar-hallazgo", className="btn-refresh", disabled=True),
@@ -110,7 +118,7 @@ layout = html.Div(className="page", children=[
                 style_table={"overflowX": "auto"},
                 style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.85rem",
                             "padding": "10px 12px", "textAlign": "left", "whiteSpace": "normal",
-                            "height": "auto", "border": "none"},
+                            "height": "auto", "border": "none", "cursor": "pointer"},
                 style_header={"backgroundColor": "#f7f7f4", "fontWeight": "700", "color": INK_MUTED,
                               "border": "none", "borderBottom": f"1px solid {GRID}"},
                 style_data={"borderBottom": f"1px solid {GRID}", "color": INK_PRIMARY},
@@ -132,6 +140,15 @@ layout = html.Div(className="page", children=[
 
     dcc.Store(id="store-hallazgo-seleccionado"),
     dcc.Store(id="hal-clicks-baseline"),
+
+    dbc.Modal([
+        dbc.ModalHeader([
+            dbc.ModalTitle(id="hal-detalle-titulo"),
+            dbc.Button(html.I(className="bi bi-x-lg"), id="btn-cerrar-detalle-hallazgo",
+                        className="btn-refresh", size="sm", n_clicks=0),
+        ], close_button=False, className="hal-detail-header"),
+        dbc.ModalBody(id="hal-detalle-body"),
+    ], id="modal-detalle-hallazgo", is_open=False, size="lg", scrollable=True, className="hal-detail-modal"),
 
     dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("¿Desea cerrar este hallazgo?"), close_button=True),
@@ -258,31 +275,48 @@ def update_hallazgos_filter_options(store_json):
     return opts("Motor"), opts("Estado"), opts("Script"), opts("Función")
 
 
+@dash.callback(
+    Output("hal-f-motor", "value"),
+    Output("hal-f-estado", "value"),
+    Output("hal-f-script", "value"),
+    Output("hal-f-funcion", "value"),
+    Output("hal-f-buscar", "value"),
+    Input("hal-btn-limpiar-filtros", "n_clicks"),
+    prevent_initial_call=True,
+)
+def limpiar_filtros_hallazgos(_n_clicks):
+    return [], [], [], [], ""
+
+
 def _hallazgo_card(idx: int, row: dict) -> html.Div:
     """Tarjeta con el mismo contenido que una fila de hal-tabla, para pantallas
-    angostas/verticales. El botón "Seleccionar" escribe directo en
+    angostas/verticales. Tocar el cuerpo abre el detalle (igual que un clic en
+    una celda de la tabla); el botón "Seleccionar" escribe directo en
     hal-tabla.selected_rows (con el mismo índice de esta fila), así que
     reutiliza sin duplicar toda la lógica de selección/edición/cierre que ya
     lee ese mismo prop."""
     pill = HALLAZGO_ESTADO_PILL.get(row["Estado"], {"bg": "#eee", "fg": "#333"})
     return html.Div(className="hal-card", children=[
-        html.Div(className="hal-card-head", children=[
-            html.Span(row["Estado"], className="status-pill",
-                       style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
-            html.Span(row["Motor"], className="hal-card-motor"),
-        ]),
-        html.Div(row["Descripción"], className="hal-card-desc"),
-        html.Div(className="hal-card-meta-grid", children=[
-            html.Div([html.Span("Proyecto", className="hal-card-meta-label"),
-                       html.Span(row["Proyecto"], className="hal-card-meta-value")]),
-            html.Div([html.Span("Script", className="hal-card-meta-label"),
-                       html.Span(row["Script"], className="hal-card-meta-value")]),
-            html.Div([html.Span("Función", className="hal-card-meta-label"),
-                       html.Span(row["Función"], className="hal-card-meta-value")]),
-            html.Div([html.Span("Fecha hallazgo", className="hal-card-meta-label"),
-                       html.Span(row["fecha_hallazgo_txt"], className="hal-card-meta-value")]),
-            html.Div([html.Span("Fecha cierre", className="hal-card-meta-label"),
-                       html.Span(row["fecha_cierre_txt"], className="hal-card-meta-value")]),
+        html.Div(className="hal-card-body-clickable",
+                  id={"type": "hal-card-view", "index": idx}, n_clicks=0, children=[
+            html.Div(className="hal-card-head", children=[
+                html.Span(row["Estado"], className="status-pill",
+                           style={"backgroundColor": pill["bg"], "color": pill["fg"]}),
+                html.Span(row["Motor"], className="hal-card-motor"),
+            ]),
+            html.Div(row["Descripción"], className="hal-card-desc"),
+            html.Div(className="hal-card-meta-grid", children=[
+                html.Div([html.Span("Proyecto", className="hal-card-meta-label"),
+                           html.Span(row["Proyecto"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Script", className="hal-card-meta-label"),
+                           html.Span(row["Script"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Función", className="hal-card-meta-label"),
+                           html.Span(row["Función"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Fecha hallazgo", className="hal-card-meta-label"),
+                           html.Span(row["fecha_hallazgo_txt"], className="hal-card-meta-value")]),
+                html.Div([html.Span("Fecha cierre", className="hal-card-meta-label"),
+                           html.Span(row["fecha_cierre_txt"], className="hal-card-meta-value")]),
+            ]),
         ]),
         dbc.Button("Seleccionar", id={"type": "hal-card-select", "index": idx},
                     className="btn-refresh btn-sm-card", size="sm", n_clicks=0),
@@ -293,10 +327,11 @@ def _hallazgo_card(idx: int, row: dict) -> html.Div:
 # KPIs + gráficos + tabla
 # --------------------------------------------------------------------------
 @dash.callback(
-    Output("hal-kpi-total", "children"),
+    Output("hal-kpi-total", "children"), Output("hal-kpi-total-ctx", "children"),
     Output("hal-kpi-abiertos", "children"), Output("hal-kpi-abiertos-icon", "className"),
-    Output("hal-kpi-revision", "children"),
-    Output("hal-kpi-cerrados", "children"),
+    Output("hal-kpi-abiertos-ctx", "children"),
+    Output("hal-kpi-revision", "children"), Output("hal-kpi-revision-ctx", "children"),
+    Output("hal-kpi-cerrados", "children"), Output("hal-kpi-cerrados-ctx", "children"),
     Output("hal-kpi-cierre", "children"),
     Output("hal-g-estado", "figure"),
     Output("hal-g-motor", "figure"),
@@ -307,12 +342,14 @@ def _hallazgo_card(idx: int, row: dict) -> html.Div:
     Input("hal-f-estado", "value"),
     Input("hal-f-script", "value"),
     Input("hal-f-funcion", "value"),
+    Input("hal-f-buscar", "value"),
 )
-def update_hallazgos(store_json, motores, estados, scripts, funciones):
+def update_hallazgos(store_json, motores, estados, scripts, funciones, buscar):
     df = hallazgos_from_store(store_json)
     if df.empty:
         empty = charts.empty_figure("Sin datos disponibles en la pestaña HALLAZGOS.")
-        return "0", "0", "kpi-icon tone-good", "0", "0", "0.0%", empty, empty, [], []
+        return ("0", "Sin registros", "0", "kpi-icon tone-good", "0% del total",
+                "0", "0% del total", "0", "0% del total", "0.0%", empty, empty, [], [])
 
     filtered = df
     if motores:
@@ -323,6 +360,13 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
         filtered = filtered[filtered["Script"].isin(scripts)]
     if funciones:
         filtered = filtered[filtered["Función"].isin(funciones)]
+    if buscar and buscar.strip():
+        query = buscar.strip().lower()
+        searchable = ["Descripción", "Motor", "Script", "Función", "Proyecto"]
+        mask = pd.Series(False, index=filtered.index)
+        for col in searchable:
+            mask |= filtered[col].fillna("").astype(str).str.lower().str.contains(query, regex=False)
+        filtered = filtered[mask]
 
     total = len(filtered)
     abiertos = int(filtered["Estado"].eq("Abierto").sum())
@@ -330,6 +374,9 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
     cerrados = int(filtered["Estado"].eq("Cerrado").sum())
     pct_cierre = (cerrados / total * 100) if total else 0.0
     abiertos_icon = "kpi-icon tone-good" if abiertos == 0 else "kpi-icon tone-critical"
+
+    def porcentaje(valor):
+        return f"{valor / total * 100:.0f}% del total" if total else "0% del total"
 
     fig_estado = charts.fig_donut_hallazgo_estado(filtered)
     fig_motor = charts.fig_hallazgos_por_motor(filtered)
@@ -339,7 +386,12 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
     tabla["fecha_cierre_txt"] = tabla["Fecha cierre"].dt.strftime("%d/%m/%Y").fillna("—")
     tabla["fecha_hallazgo_iso"] = tabla["Fecha hallazgo"].dt.strftime("%Y-%m-%d")
     tabla["fecha_cierre_iso"] = tabla["Fecha cierre"].dt.strftime("%Y-%m-%d")
-    tabla_data = tabla[["Estado", "Motor", "Script", "Función", "Descripción", "Proyecto",
+    # "id" es una clave reservada de dash_table: permite identificar la fila por
+    # active_cell.row_id sin importar el orden visual tras un ordenamiento nativo
+    # (los hallazgos no tienen un ID de negocio propio, así que se usa la
+    # posición en el DataFrame ya filtrado, estable mientras dure este render).
+    tabla["id"] = tabla.index.astype(str)
+    tabla_data = tabla[["id", "Estado", "Motor", "Script", "Función", "Descripción", "Proyecto",
                          "fecha_hallazgo_txt", "fecha_cierre_txt",
                          "fecha_hallazgo_iso", "fecha_cierre_iso"]].to_dict("records")
     # to_dict convierte los None de las fechas vacías en NaN (float); DatePickerSingle
@@ -352,7 +404,10 @@ def update_hallazgos(store_json, motores, estados, scripts, funciones):
 
     cards = [_hallazgo_card(i, fila) for i, fila in enumerate(tabla_data)]
 
-    return (str(total), str(abiertos), abiertos_icon, str(revision), str(cerrados),
+    return (str(total), "Resultado de los filtros",
+            str(abiertos), abiertos_icon, porcentaje(abiertos),
+            str(revision), porcentaje(revision),
+            str(cerrados), porcentaje(cerrados),
             f"{pct_cierre:.1f}%", fig_estado, fig_motor, tabla_data, cards)
 
 
@@ -416,6 +471,86 @@ def _campo_modal(label: str, value: str) -> html.Div:
         html.Div(label, className="modal-field-label"),
         html.Div(value, className="modal-field-value"),
     ], className="modal-field")
+
+
+# --------------------------------------------------------------------------
+# Panel de detalle (drawer lateral, mismo patrón que el detalle de
+# Actividades en app.py): clic en una celda de la tabla o en el cuerpo de
+# una tarjeta abre una vista de solo lectura, independiente de la selección
+# por casilla que usan Cerrar/Editar/Eliminar/Convertir en conocimiento.
+# --------------------------------------------------------------------------
+def _construir_detalle_hallazgo(fila: dict) -> html.Div:
+    descriptor_prefix = f"{fila['Motor']} / {fila['Script']} / {fila['Función']}"
+    conocimientos = km.load_knowledge()
+    relacionados = conocimientos[
+        conocimientos["hallazgos_relacionados"].fillna("").astype(str).str.contains(descriptor_prefix, regex=False)
+    ]
+    bloque_conocimiento = html.Div(className="hal-detail-related", children=[
+        html.Div([html.Span(k["conocimiento_id"], className="hal-card-motor"),
+                   html.Div(k["titulo"], className="fw-semibold")])
+        for _, k in relacionados.iterrows()
+    ]) if not relacionados.empty else html.Div("No hay conocimiento relacionado registrado.",
+                                                  className="section-caption")
+
+    return html.Div(className="hal-detail-body", children=[
+        html.Div([badge_hallazgo_estado(fila["Estado"]), badge_proyecto(fila["Proyecto"])],
+                  className="d-flex gap-2 mb-3"),
+        html.Div("Información", className="section-title"),
+        html.Div(className="hal-detail-fields", children=[
+            _campo_modal("Motor", fila["Motor"]),
+            _campo_modal("Script", fila["Script"]),
+            _campo_modal("Función", fila["Función"]),
+            _campo_modal("Proyecto", fila["Proyecto"]),
+            _campo_modal("Fecha hallazgo", fila["fecha_hallazgo_txt"]),
+            _campo_modal("Fecha cierre", fila["fecha_cierre_txt"]),
+        ]),
+        html.Div("Descripción", className="section-title mt-3"),
+        html.Div(fila["Descripción"] or "No registrada.", className="hal-detail-text"),
+        html.Div("Conocimiento relacionado", className="section-title mt-3"),
+        bloque_conocimiento,
+    ])
+
+
+@dash.callback(
+    Output("modal-detalle-hallazgo", "is_open"),
+    Output("hal-detalle-titulo", "children"),
+    Output("hal-detalle-body", "children"),
+    Input("hal-tabla", "active_cell"),
+    Input({"type": "hal-card-view", "index": ALL}, "n_clicks"),
+    State("hal-tabla", "data"),
+    prevent_initial_call=True,
+)
+def abrir_detalle_hallazgo(active_cell, n_clicks_list, table_data):
+    triggered_id = dash.ctx.triggered_id
+    fila = None
+
+    if triggered_id == "hal-tabla":
+        if not active_cell:
+            return dash.no_update, dash.no_update, dash.no_update
+        row_id = active_cell.get("row_id")
+        fila = next((d for d in (table_data or []) if str(d.get("id")) == str(row_id)), None)
+    elif isinstance(triggered_id, dict) and triggered_id.get("type") == "hal-card-view":
+        if not n_clicks_list or not any(n_clicks_list):
+            return dash.no_update, dash.no_update, dash.no_update
+        idx = triggered_id["index"]
+        if not table_data or idx >= len(table_data):
+            return dash.no_update, dash.no_update, dash.no_update
+        fila = table_data[idx]
+
+    if not fila:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    titulo = [html.I(className="bi bi-search me-2"), f"{fila['Motor']} — {fila['Script']}"]
+    return True, titulo, _construir_detalle_hallazgo(fila)
+
+
+@dash.callback(
+    Output("modal-detalle-hallazgo", "is_open", allow_duplicate=True),
+    Input("btn-cerrar-detalle-hallazgo", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cerrar_detalle_hallazgo(_n_clicks):
+    return False
 
 
 _IDENTIDAD_KEYS = ["proyecto", "motor", "script", "funcion", "descripcion", "estado_actual"]
@@ -793,6 +928,7 @@ def convertir_hallazgo_en_conocimiento(n_clicks, seleccionado):
     Output("modal-editar-hallazgo", "is_open", allow_duplicate=True),
     Output("modal-eliminar-hallazgo", "is_open", allow_duplicate=True),
     Output("modal-cerrar-hallazgo", "is_open", allow_duplicate=True),
+    Output("modal-detalle-hallazgo", "is_open", allow_duplicate=True),
     Output("hal-form-error", "children", allow_duplicate=True),
     Output("hal-edit-form-error", "children", allow_duplicate=True),
     Output("hal-tabla", "selected_rows", allow_duplicate=True),
@@ -806,11 +942,11 @@ def convertir_hallazgo_en_conocimiento(n_clicks, seleccionado):
 )
 def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_cerrar):
     if pathname != "/hallazgos":
-        return (dash.no_update,) * 8
+        return (dash.no_update,) * 9
     baseline = {
         "btn-nuevo-hallazgo": n_nuevo or 0,
         "btn-editar-hallazgo": n_editar or 0,
         "btn-eliminar-hallazgo": n_eliminar or 0,
         "btn-cerrar-hallazgo": n_cerrar or 0,
     }
-    return False, False, False, False, None, None, [], baseline
+    return False, False, False, False, False, None, None, [], baseline
