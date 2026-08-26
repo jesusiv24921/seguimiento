@@ -19,15 +19,37 @@ import pandas as pd
 from dash import ALL, Input, Output, State, dcc, html
 
 import data as data_mod
-from components import badge_proyecto, chart_card, kpi_card, page_header, success_state
-from data_store import apply_all_filters, df_from_store, df_to_store
+from components import badge_prioridad, badge_proyecto, chart_card, kpi_card, page_header, success_state
+from data_store import apply_all_filters, df_from_store, df_to_store, lookups_from_store
+from theme import PRIORIDAD_PILL
 
 dash.register_page(__name__, path="/bloqueos", name="Bloqueos y pendientes", title="Bloqueos y pendientes")
+
+PRIORIDADES_FILTRO = [k for k in PRIORIDAD_PILL if k != "Sin prioridad"] + ["Sin prioridad"]
 
 layout = html.Div(className="page", children=[
     page_header("Bloqueos y pendientes",
                  "Qué está frenado, qué tareas quedaron pendientes de actividades anteriores, y por qué.",
                  period_id="page-header-period"),
+
+    html.Div(className="filters-panel", children=[
+        html.Div([html.I(className="bi bi-sliders"), "Filtros"], className="filters-panel-title"),
+        html.Div(className="filters-grid", children=[
+            html.Div([
+                html.Div([html.I(className="bi bi-search"), "Buscar"], className="filter-label"),
+                dbc.Input(id="blq-f-buscar", type="text", debounce=True,
+                           placeholder="Tema, actividad, descripción..."),
+            ], className="filter-field"),
+            html.Div([
+                html.Div([html.I(className="bi bi-folder2"), "Proyecto"], className="filter-label"),
+                dcc.Dropdown(id="blq-f-proyecto", multi=True, placeholder="Todos"),
+            ], className="filter-field"),
+            html.Div([
+                html.Div([html.I(className="bi bi-exclamation-circle"), "Prioridad"], className="filter-label"),
+                dcc.Dropdown(id="blq-f-prioridad", options=PRIORIDADES_FILTRO, multi=True, placeholder="Todas"),
+            ], className="filter-field"),
+        ]),
+    ]),
 
     html.Div([
         kpi_card("blq-kpi-total", "Total bloqueos", "bi bi-exclamation-triangle",
@@ -36,19 +58,23 @@ layout = html.Div(className="page", children=[
         kpi_card("blq-kpi-newopps", "New Opps", "bi bi-rocket-takeoff"),
         kpi_card("blq-kpi-pendientes", "Pendientes", "bi bi-flag",
                   icon_id="blq-kpi-pendientes-icon", tone="tone-good"),
+        kpi_card("blq-kpi-vencidos", "Pendientes vencidos", "bi bi-alarm",
+                  icon_id="blq-kpi-vencidos-icon", tone="tone-good"),
     ], className="kpi-grid"),
 
     chart_card([
         html.Div([html.I(className="bi bi-list-ul"), "Detalle de bloqueos"], className="section-title"),
-        html.Div(id="blq-lista"),
+        html.Div("Ordenados del más antiguo al más reciente — lo que lleva más tiempo frenado aparece primero.",
+                  className="section-caption"),
+        html.Div(id="blq-lista", className="hal-cards-grid"),
     ]),
 
     chart_card([
         html.Div([html.I(className="bi bi-flag"), "Pendientes generados desde actividades"], className="section-title"),
-        html.Div("Se muestran todos los pendientes abiertos, sin importar el filtro de fecha del periodo. "
-                  "Un pendiente solo desaparece de aquí cuando se cierra con un comentario.",
-                  className="section-caption"),
-        html.Div(id="blq-lista-pendientes"),
+        html.Div("Se muestran todos los pendientes abiertos, sin importar el filtro de fecha del periodo — "
+                  "ordenados por urgencia, vencidos primero. Un pendiente solo desaparece de aquí cuando se "
+                  "cierra con un comentario.", className="section-caption"),
+        html.Div(id="blq-lista-pendientes", className="hal-cards-grid"),
     ]),
 
     dcc.Store(id="store-pendiente-seleccionado"),
@@ -75,26 +101,80 @@ layout = html.Div(className="page", children=[
 ])
 
 
+def _chip(texto: str, tono: str) -> html.Span:
+    return html.Span(texto, className=f"blq-chip blq-chip-{tono}")
+
+
+def _chip_bloqueado(fecha_inicio) -> html.Span:
+    dias = (dt.date.today() - fecha_inicio.date()).days
+    if dias <= 0:
+        return _chip("Bloqueado hoy", "warning")
+    texto = f"Bloqueado hace {dias} día{'s' if dias != 1 else ''}"
+    return _chip(texto, "critical" if dias >= 5 else "warning")
+
+
+def _chip_vencimiento(fecha_limite) -> tuple[html.Span, int]:
+    dias = (fecha_limite.date() - dt.date.today()).days
+    if dias < 0:
+        return _chip(f"Vencido hace {abs(dias)} día{'s' if abs(dias) != 1 else ''}", "critical"), dias
+    if dias == 0:
+        return _chip("Vence hoy", "warning"), dias
+    if dias <= 3:
+        return _chip(f"Vence en {dias} día{'s' if dias != 1 else ''}", "warning"), dias
+    return _chip(f"Vence en {dias} días", "neutral"), dias
+
+
+def _filtrar_comunes(df, proyectos, prioridades, buscar):
+    if proyectos:
+        df = df[df["proyecto"].isin(proyectos)]
+    if prioridades:
+        df = df[df["prioridad"].isin(prioridades)]
+    if buscar:
+        q = buscar.strip().lower()
+        df = df[
+            df["tema"].fillna("").str.lower().str.contains(q, regex=False)
+            | df["actividad"].fillna("").str.lower().str.contains(q, regex=False)
+            | df["descripcion"].fillna("").str.lower().str.contains(q, regex=False)
+            | df["resultado"].fillna("").str.lower().str.contains(q, regex=False)
+        ]
+    return df
+
+
+@dash.callback(
+    Output("blq-f-proyecto", "options"),
+    Input("store-lookups", "data"),
+)
+def update_bloqueos_proyecto_options(lookups_json):
+    lookups = lookups_from_store(lookups_json)
+    return [{"label": r["proyecto"], "value": r["proyecto"]} for r in lookups["proyectos"]]
+
+
 @dash.callback(
     Output("blq-kpi-total", "children"), Output("blq-kpi-total-icon", "className"),
     Output("blq-kpi-sentinel", "children"),
     Output("blq-kpi-newopps", "children"),
     Output("blq-kpi-pendientes", "children"), Output("blq-kpi-pendientes-icon", "className"),
+    Output("blq-kpi-vencidos", "children"), Output("blq-kpi-vencidos-icon", "className"),
     Output("blq-lista", "children"),
     Output("blq-lista-pendientes", "children"),
     Input("store-data", "data"),
     Input("f-fechas", "start_date"),
     Input("f-fechas", "end_date"),
+    Input("blq-f-proyecto", "value"),
+    Input("blq-f-prioridad", "value"),
+    Input("blq-f-buscar", "value"),
 )
-def update_bloqueos(store_json, start_date, end_date):
+def update_bloqueos(store_json, start_date, end_date, proyectos, prioridades, buscar):
     df = df_from_store(store_json)
     if df.empty:
         vacio = success_state("Sin datos disponibles.")
-        return "0", "kpi-icon tone-good", "0", "0", "0", "kpi-icon tone-good", vacio, vacio
+        return ("0", "kpi-icon tone-good", "0", "0", "0", "kpi-icon tone-good",
+                "0", "kpi-icon tone-good", vacio, vacio)
 
     bloqueados = apply_all_filters(df[df["estado"] == "Bloqueado"], start_date, end_date)
+    bloqueados = _filtrar_comunes(bloqueados, proyectos, prioridades, buscar)
     # Los pendientes NO se filtran por fecha: deben verse siempre hasta que se cierren.
-    pendientes = df[df["estado"] == "Pendiente"]
+    pendientes = _filtrar_comunes(df[df["estado"] == "Pendiente"], proyectos, prioridades, buscar)
 
     total = len(bloqueados)
     n_sentinel = int(bloqueados["proyecto"].eq("Sentinel Alerts").sum())
@@ -104,33 +184,48 @@ def update_bloqueos(store_json, start_date, end_date):
     n_pendientes = len(pendientes)
     pendientes_icon_tone = "kpi-icon tone-good" if n_pendientes == 0 else "kpi-icon tone-warning"
 
+    n_vencidos = int((pendientes["fecha_inicio"].dt.date < dt.date.today()).sum()) if not pendientes.empty else 0
+    vencidos_icon_tone = "kpi-icon tone-good" if n_vencidos == 0 else "kpi-icon tone-critical"
+
     if bloqueados.empty:
-        lista = success_state("No existen actividades bloqueadas en el periodo seleccionado.")
+        lista = success_state("No existen actividades bloqueadas con estos filtros.")
     else:
         cards = []
-        for _, r in bloqueados.sort_values("fecha_inicio", ascending=False).iterrows():
+        # Lo que lleva más tiempo bloqueado es lo más urgente: se ordena por
+        # fecha ascendente (el bloqueo más antiguo primero), no por el más
+        # reciente.
+        for _, r in bloqueados.sort_values("fecha_inicio", ascending=True).iterrows():
             cards.append(html.Div(className="blocker-card", children=[
                 html.Div([html.I(className="bi bi-exclamation-octagon-fill"), badge_proyecto(r["proyecto"])],
                           className="blocker-card-head"),
                 html.Div(r["tema"] or r["actividad"], className="blocker-card-title"),
                 html.Div(f"Problema: {r['resultado'] or 'No especificado en los datos.'}",
                           className="blocker-card-body"),
-                html.Div(f"Fecha: {r['fecha_inicio'].strftime('%d/%m/%Y')}", className="blocker-card-meta"),
+                html.Div(className="blq-chip-row", children=[
+                    _chip_bloqueado(r["fecha_inicio"]), badge_prioridad(r["prioridad"]),
+                ]),
+                html.Div(f"Desde el {r['fecha_inicio'].strftime('%d/%m/%Y')}", className="blocker-card-meta"),
             ]))
-        lista = html.Div(cards, className="blocker-list")
+        lista = cards
 
     if pendientes.empty:
-        lista_pendientes = success_state("No hay pendientes abiertos.")
+        lista_pendientes = success_state("No hay pendientes abiertos con estos filtros.")
     else:
         cards_p = []
-        for _, r in pendientes.sort_values("fecha_inicio", ascending=True).iterrows():
+        filas_con_urgencia = []
+        for _, r in pendientes.iterrows():
+            chip, dias = _chip_vencimiento(r["fecha_inicio"])
+            filas_con_urgencia.append((dias, r, chip))
+        filas_con_urgencia.sort(key=lambda t: t[0])  # vencidos (negativos) primero, luego más próximos
+
+        for dias, r, chip in filas_con_urgencia:
             cards_p.append(html.Div(className="pending-card", children=[
                 html.Div([html.I(className="bi bi-flag-fill"), badge_proyecto(r["proyecto"])],
                           className="blocker-card-head"),
                 html.Div(r["actividad"], className="blocker-card-title"),
                 html.Div(r["descripcion"] or "Sin descripción.", className="blocker-card-body"),
-                html.Div(f"Fecha límite: {r['fecha_inicio'].strftime('%d/%m/%Y')} · Prioridad: {r['prioridad']}",
-                          className="blocker-card-meta"),
+                html.Div(className="blq-chip-row", children=[chip, badge_prioridad(r["prioridad"])]),
+                html.Div(f"Fecha límite: {r['fecha_inicio'].strftime('%d/%m/%Y')}", className="blocker-card-meta"),
                 html.Div(r["observaciones"], className="blocker-card-meta") if r["observaciones"] else None,
                 html.Div(className="pending-card-actions", children=[
                     dbc.Button([html.I(className="bi bi-check2-circle"), "Cerrar pendiente"],
@@ -138,10 +233,11 @@ def update_bloqueos(store_json, start_date, end_date):
                                 className="btn-refresh", size="sm", n_clicks=0),
                 ]),
             ]))
-        lista_pendientes = html.Div(cards_p, className="blocker-list")
+        lista_pendientes = cards_p
 
     return (str(total), icon_tone, str(n_sentinel), str(n_newopps),
-            str(n_pendientes), pendientes_icon_tone, lista, lista_pendientes)
+            str(n_pendientes), pendientes_icon_tone, str(n_vencidos), vencidos_icon_tone,
+            lista, lista_pendientes)
 
 
 # --------------------------------------------------------------------------

@@ -826,6 +826,20 @@ body {
 .pending-card .blocker-card-body { font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.5; margin-bottom: 0.2rem; }
 .pending-card-actions { margin-top: 0.6rem; }
 
+/* Chips de urgencia (Bloqueos y pendientes): cuánto tiempo lleva bloqueado
+   / cuánto falta o pasó de la fecha límite de un pendiente. */
+.blq-chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0; }
+.blq-chip {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.blq-chip-critical { background-color: var(--critical-wash); color: var(--critical); }
+.blq-chip-warning { background-color: var(--warning-wash); color: var(--warning); }
+.blq-chip-neutral { background-color: var(--surface-sunken); color: var(--ink-muted); }
+
 /* ---------------------------------------------------------------------
    Tablas responsive: en pantallas angostas/verticales, dash_table se
    reemplaza por una lista de tarjetas (más legible que hacer scroll
