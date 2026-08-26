@@ -106,17 +106,17 @@ layout = html.Div(className="page", children=[
                     ]),
                     html.Div(className="d-flex gap-1", children=[
                         dbc.Button([html.I(className="bi bi-grid-3x3-gap"), "Tarjetas"],
-                                    id="con-btn-vista-tarjetas", className="btn-refresh active", size="sm", n_clicks=0),
+                                    id="con-btn-vista-tarjetas", className="btn-refresh", size="sm", n_clicks=0),
                         dbc.Button([html.I(className="bi bi-table"), "Tabla"],
-                                    id="con-btn-vista-tabla", className="btn-refresh", size="sm", n_clicks=0),
+                                    id="con-btn-vista-tabla", className="btn-refresh active", size="sm", n_clicks=0),
                     ]),
                 ]),
 
-                html.Div(id="con-explorar-cards-wrap", style={"display": "block"}, children=[
+                html.Div(id="con-explorar-cards-wrap", style={"display": "none"}, children=[
                     html.Div(id="con-explorar-cards", className="hal-cards-grid"),
                 ]),
 
-                html.Div(id="con-explorar-tabla-wrap", style={"display": "none"}, children=[
+                html.Div(id="con-explorar-tabla-wrap", style={"display": "block"}, children=[
                     html.Div(className="hal-actions-row", children=[
                         dbc.Button([html.I(className="bi bi-eye"), "Ver detalle"],
                                     id="btn-ver-conocimiento", className="btn-refresh", disabled=True),
@@ -1115,20 +1115,23 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     Output("con-detalle-body", "children"),
     Output("store-conocimiento-seleccionado", "data", allow_duplicate=True),
     Input("btn-ver-conocimiento", "n_clicks"),
+    Input("con-tabla", "active_cell"),
     Input({"type": "con-item-select", "index": ALL}, "n_clicks"),
     Input({"type": "con-archivo-subido", "index": ALL}, "contents"),
+    State("con-tabla", "data"),
     State({"type": "con-archivo-subido", "index": ALL}, "filename"),
     State("store-conocimiento-seleccionado", "data"),
     State("con-clicks-baseline", "data"),
     State("store-data", "data"),
     prevent_initial_call=True,
 )
-def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, filenames_list,
+def abrir_detalle_conocimiento(n_clicks, active_cell, item_clicks_list, contents_list, table_data, filenames_list,
                                 conocimiento_id, baseline, actividades_json):
     umbral = (baseline or {}).get("btn-ver-conocimiento", 0)
     triggered_id = dash.ctx.triggered_id
 
     es_por_boton = triggered_id == "btn-ver-conocimiento"
+    es_por_tabla = triggered_id == "con-tabla"
     es_por_item = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-item-select"
     es_por_archivo = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-archivo-subido"
 
@@ -1141,6 +1144,11 @@ def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, filena
         # _con_reciente_row) para que el mismo id nunca se repita si una
         # misma entrada aparece a la vez en varias secciones de la página.
         conocimiento_id = triggered_id["index"].split(":", 1)[-1]
+    if es_por_tabla:
+        idx = (active_cell or {}).get("row")
+        if idx is None or not table_data or idx >= len(table_data):
+            return dash.no_update, dash.no_update, dash.no_update
+        conocimiento_id = table_data[idx]["conocimiento_id"]
     if not conocimiento_id:
         return dash.no_update, dash.no_update, dash.no_update
 
