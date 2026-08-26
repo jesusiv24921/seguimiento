@@ -958,6 +958,10 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     if fila.empty:
         return _estado_vacio_detalle()
     r = fila.iloc[0]
+    descripcion_txt = _texto_o_vacio(r["descripcion_breve"])
+    contenido_txt = _texto_o_vacio(r["contenido"])
+    objetivo_txt = _texto_o_vacio(r["objetivo_estudio"])
+    proyectos_txt = _texto_o_vacio(r["proyectos"]) or "Ninguno"
 
     dfa = km.load_knowledge_files()
     archivos = dfa[dfa["conocimiento_id"] == conocimiento_id]
@@ -976,7 +980,7 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
                   className="d-flex align-items-center gap-2 mb-2"),
         html.Div([html.Span(e, className="hal-card-motor") for e in etiquetas],
                   className="con-detalle-etiquetas") if etiquetas else None,
-        html.Div(r["descripcion_breve"] or "", className="section-caption mb-3"),
+        html.Div(descripcion_txt, className="section-caption mb-3"),
     ]
     if leccion_txt:
         tab_resumen.append(html.Div(className="con-leccion-box", children=[
@@ -989,7 +993,7 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
 
     # ---- Contenido ----
     tab_contenido = [
-        dcc.Markdown(r["contenido"] or "", className="mb-3"),
+        dcc.Markdown(contenido_txt or "_Sin contenido registrado todavía._", className="mb-3"),
         html.Div("🤖 Acciones IA", className="section-title"),
         html.Div(className="d-flex flex-wrap gap-2 mb-2", children=[
             _accion_ia_boton("Explicarme", "bi bi-mortarboard", "explicar"),
@@ -1005,8 +1009,8 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     # ---- Conceptos ----
     conceptos = km.parse_conceptos(r["conceptos"])
     tab_conceptos = []
-    if r["objetivo_estudio"]:
-        tab_conceptos.append(html.Div([html.Span("🎯 ", className="me-1"), r["objetivo_estudio"]],
+    if objetivo_txt:
+        tab_conceptos.append(html.Div([html.Span("🎯 ", className="me-1"), objetivo_txt],
                                         className="section-caption mb-2"))
     if conceptos:
         progreso = km.progreso_promedio(r["conceptos"])
@@ -1054,7 +1058,6 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
             for a in relacionadas_kw
         ])
 
-    proyectos_txt = r["proyectos"] or "Ninguno"
     tab_relaciones = dbc.Row([
         dbc.Col([html.Div("Proyectos", className="section-title"),
                   html.Div(proyectos_txt, className="section-caption")], md=6, className="mb-3"),
@@ -1091,13 +1094,18 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
             dbc.Button(html.I(className="bi bi-x-lg"), id="con-detalle-cerrar",
                         className="btn-refresh con-detalle-cerrar-btn", size="sm", n_clicks=0),
         ]),
-        dbc.Tabs(active_tab="resumen", children=[
-            dbc.Tab(tab_resumen, label="Resumen", tab_id="resumen"),
-            dbc.Tab(tab_contenido, label="Contenido", tab_id="contenido"),
-            dbc.Tab(tab_conceptos, label="Conceptos", tab_id="conceptos"),
-            dbc.Tab(tab_relaciones, label="Relaciones", tab_id="relaciones"),
-            dbc.Tab(tab_archivos, label="Archivos", tab_id="archivos"),
-            dbc.Tab(tab_historial, label="Historial", tab_id="historial"),
+        html.Div(className="con-detalle-secciones", children=[
+            html.Div(tab_resumen, className="con-detalle-seccion"),
+            html.Div([html.Div("Contenido", className="section-title"), *tab_contenido],
+                     className="con-detalle-seccion"),
+            html.Div([html.Div("Conceptos", className="section-title"), *tab_conceptos],
+                     className="con-detalle-seccion"),
+            html.Div([html.Div("Relaciones", className="section-title"), tab_relaciones],
+                     className="con-detalle-seccion"),
+            html.Div([html.Div("Archivos", className="section-title"), *tab_archivos],
+                     className="con-detalle-seccion"),
+            html.Div([html.Div("Historial", className="section-title"), tab_historial],
+                     className="con-detalle-seccion"),
         ]),
     ])
 
