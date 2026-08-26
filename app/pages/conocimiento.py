@@ -1108,23 +1108,16 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     Input("btn-ver-conocimiento", "n_clicks"),
     Input({"type": "con-item-select", "index": ALL}, "n_clicks"),
     Input({"type": "con-archivo-subido", "index": ALL}, "contents"),
-    Input("con-detalle-cerrar", "n_clicks"),
     State({"type": "con-archivo-subido", "index": ALL}, "filename"),
     State("store-conocimiento-seleccionado", "data"),
     State("con-clicks-baseline", "data"),
     State("store-data", "data"),
     prevent_initial_call=True,
 )
-def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, _n_cerrar, filenames_list,
+def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, filenames_list,
                                 conocimiento_id, baseline, actividades_json):
     umbral = (baseline or {}).get("btn-ver-conocimiento", 0)
     triggered_id = dash.ctx.triggered_id
-
-    if triggered_id == "con-detalle-cerrar":
-        # No se toca store-conocimiento-seleccionado al cerrar: si el usuario
-        # había seleccionado una fila por checkbox para Editar/Eliminar, esa
-        # selección administrativa debe seguir intacta aunque cierre el panel.
-        return "con-detalle-panel", _estado_vacio_detalle(), dash.no_update
 
     es_por_boton = triggered_id == "btn-ver-conocimiento"
     es_por_item = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-item-select"
@@ -1156,6 +1149,17 @@ def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, _n_cer
     # (tarjeta clickeada directamente o fila de la tabla administrativa).
     return ("con-detalle-panel con-detalle-abierto",
             _construir_detalle(conocimiento_id, actividades_json), conocimiento_id)
+
+
+@dash.callback(
+    Output("con-detalle-panel", "className", allow_duplicate=True),
+    Output("con-detalle-body", "children", allow_duplicate=True),
+    Input("con-detalle-cerrar", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cerrar_detalle_conocimiento(_n_clicks):
+    """Cierra un panel que ya fue renderizado."""
+    return "con-detalle-panel", _estado_vacio_detalle()
 
 
 # --------------------------------------------------------------------------
