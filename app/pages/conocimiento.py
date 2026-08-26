@@ -168,18 +168,15 @@ layout = html.Div(className="page", children=[
             ]),
         ]),
 
-        html.Div(id="con-detalle-panel", className="con-detalle-panel", children=[
-            html.Div(className="con-detalle-toolbar", children=[
-                dbc.Button(html.I(className="bi bi-x-lg"), id="con-detalle-cerrar",
-                           className="btn-refresh con-detalle-cerrar-btn", size="sm", n_clicks=0),
-            ]),
-            html.Div(id="con-detalle-body", children=[
-                html.Div(className="empty-state", children=[
-                    html.I(className="bi bi-journal-text"),
-                    html.Div("Selecciona una entrada para ver el detalle."),
-                ]),
-            ]),
-        ]),
+        dbc.Modal([
+            dbc.ModalHeader([
+                dbc.ModalTitle(id="con-detalle-title"),
+                dbc.Button(html.I(className="bi bi-x-lg"), id="btn-cerrar-detalle-conocimiento",
+                           className="btn-refresh", size="sm", n_clicks=0),
+            ], close_button=False, className="activity-detail-header"),
+            dbc.ModalBody(id="con-detalle-body"),
+        ], id="modal-detalle-conocimiento", is_open=False, scrollable=True,
+           className="knowledge-detail-modal"),
     ]),
 
     dcc.Store(id="store-conocimiento-seleccionado"),
@@ -1111,7 +1108,8 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
 
 
 @dash.callback(
-    Output("con-detalle-panel", "className"),
+    Output("modal-detalle-conocimiento", "is_open"),
+    Output("con-detalle-title", "children"),
     Output("con-detalle-body", "children"),
     Output("store-conocimiento-seleccionado", "data", allow_duplicate=True),
     Input("btn-ver-conocimiento", "n_clicks"),
@@ -1136,10 +1134,10 @@ def abrir_detalle_conocimiento(n_clicks, active_cell, item_clicks_list, contents
     es_por_archivo = isinstance(triggered_id, dict) and triggered_id.get("type") == "con-archivo-subido"
 
     if es_por_boton and (not n_clicks or n_clicks <= umbral):
-        return dash.no_update, dash.no_update, dash.no_update
+        return (dash.no_update,) * 4
     if es_por_item:
         if not item_clicks_list or not any(item_clicks_list):
-            return dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 4
         # El index viene como "seccion:conocimiento_id" (ver _con_card /
         # _con_reciente_row) para que el mismo id nunca se repita si una
         # misma entrada aparece a la vez en varias secciones de la página.
@@ -1147,10 +1145,10 @@ def abrir_detalle_conocimiento(n_clicks, active_cell, item_clicks_list, contents
     if es_por_tabla:
         idx = (active_cell or {}).get("row")
         if idx is None or not table_data or idx >= len(table_data):
-            return dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 4
         conocimiento_id = table_data[idx]["conocimiento_id"]
     if not conocimiento_id:
-        return dash.no_update, dash.no_update, dash.no_update
+        return (dash.no_update,) * 4
 
     if es_por_archivo and contents_list and any(contents_list):
         idx = [i for i, c in enumerate(contents_list) if c][-1]
@@ -1164,24 +1162,23 @@ def abrir_detalle_conocimiento(n_clicks, active_cell, item_clicks_list, contents
     # seleccionado por checkbox) para que "Acciones IA" siempre opere sobre
     # la entrada que el usuario está viendo, sin importar cómo llegó a ella
     # (tarjeta clickeada directamente o fila de la tabla administrativa).
-    return ("con-detalle-panel con-detalle-abierto",
-            _construir_detalle(conocimiento_id, actividades_json), conocimiento_id)
+    conocimiento = km.load_knowledge()
+    fila = conocimiento[conocimiento["conocimiento_id"] == conocimiento_id]
+    titulo = fila.iloc[0].get("titulo", "Detalle de conocimiento") if not fila.empty else "Detalle de conocimiento"
+    return (True, titulo, _construir_detalle(conocimiento_id, actividades_json), conocimiento_id)
 
 
 @dash.callback(
-    Output("con-detalle-panel", "className", allow_duplicate=True),
-    Output("con-detalle-body", "children", allow_duplicate=True),
-    Input("con-detalle-cerrar", "n_clicks"),
+    Output("modal-detalle-conocimiento", "is_open", allow_duplicate=True),
+    Input("btn-cerrar-detalle-conocimiento", "n_clicks"),
     prevent_initial_call=True,
 )
-def cerrar_detalle_conocimiento(_n_clicks):
+def cerrar_detalle_conocimiento(n_clicks):
     """Cierra un panel únicamente después de un clic real en su botón."""
     # Dash puede disparar el callback cuando el botón se inserta dinámicamente
     # con n_clicks=0. Ese evento inicial no debe cerrar el detalle recién
     # abierto.
-    if not _n_clicks:
-        return dash.no_update, dash.no_update
-    return "con-detalle-panel", _estado_vacio_detalle()
+    return False if n_clicks else dash.no_update
 
 
 # --------------------------------------------------------------------------
