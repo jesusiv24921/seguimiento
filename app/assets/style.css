@@ -992,6 +992,35 @@ body {
 .con-detalle-seccion { padding-top: 0.9rem; border-top: 1px solid var(--border-hairline); }
 .con-detalle-seccion:first-child { padding-top: 0; border-top: none; }
 
+/* Actividades: controles operativos y detalle lateral. */
+.act-page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.act-page-header .page-header { flex: 1; }
+.act-filters-card { margin-bottom: 1rem; }
+.act-filters-card .mb-3 { margin-bottom: 0 !important; }
+.act-kpi-grid { margin-bottom: 1rem; }
+
+.activity-detail-modal .modal-dialog {
+    width: min(560px, 100vw);
+    max-width: 560px;
+    height: 100vh;
+    margin: 0 0 0 auto;
+}
+.activity-detail-modal .modal-content { height: 100vh; border-radius: 0 !important; }
+.activity-detail-modal .modal-body { overflow-y: auto; }
+.activity-detail-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+.activity-detail-fields .modal-field { margin: 0; }
+.activity-detail-text { color: var(--ink-secondary); line-height: 1.55; }
+.activity-detail-text .modal-field { margin: 0; }
+.activity-detail-text .modal-field-label { display: none; }
+.activity-detail-related { display: flex; flex-direction: column; gap: 0.6rem; }
+.activity-detail-related > div { padding: 0.75rem; border: 1px solid var(--border-hairline); border-radius: var(--radius-md); }
+
+@media (max-width: 640px) {
+    .act-page-header { align-items: stretch; flex-direction: column; }
+    .act-page-header .btn-refresh { align-self: flex-start; }
+    .activity-detail-fields { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 1280px) and (min-width: 993px) {
     .con-layout-grid { grid-template-columns: minmax(0, 1fr) 440px; }
 }

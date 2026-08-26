@@ -10,7 +10,7 @@ import pandas as pd
 from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import data as data_mod
-from components import badge_estado, badge_prioridad, chart_card, page_header
+from components import badge_estado, badge_prioridad, chart_card, kpi_card, page_header
 from data_store import apply_all_filters, df_from_store, df_to_store, lookups_from_store
 from theme import ESTADO_PILL, GRID, INK_MUTED, INK_PRIMARY, PRIORIDAD_PILL
 
@@ -18,6 +18,8 @@ dash.register_page(__name__, path="/actividades", name="Actividades", title="Act
 
 ESTADOS_FORM = ["Bloqueado", "Completado", "En progreso"]
 PRIORIDADES_FORM = ["Alta", "Media", "Baja"]
+ESTADOS_FILTRO = ["Completado", "En progreso", "Pendiente", "Bloqueado", "Sin estado"]
+PRIORIDADES_FILTRO = ["Alta", "Media", "Baja", "Sin prioridad"]
 _HORA_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -91,8 +93,36 @@ eliminar_actividad_modal = dbc.Modal([
 ], id="modal-eliminar-actividad", is_open=False)
 
 layout = html.Div(className="page", children=[
-    page_header("Actividades", "Registro detallado de actividades desarrolladas.",
-                 period_id="page-header-period"),
+    html.Div(className="act-page-header", children=[
+        page_header("Actividades", "Registro detallado de actividades desarrolladas.",
+                    period_id="page-header-period"),
+        dbc.Button([html.I(className="bi bi-plus-lg"), "Nueva actividad"],
+                   id="btn-nueva-actividad", className="btn-refresh", n_clicks=0),
+    ]),
+    chart_card([
+        html.Div([html.I(className="bi bi-sliders"), "Filtros de actividades"], className="section-title"),
+        html.Div("El período se aplica desde los filtros globales superiores.", className="section-caption mb-2"),
+        dbc.Row([
+            dbc.Col(_campo("Proyecto", "bi bi-folder2", dcc.Dropdown(id="act-f-proyecto", multi=True,
+                    placeholder="Todos los proyectos")), md=3),
+            dbc.Col(_campo("Estado", "bi bi-flag", dcc.Dropdown(id="act-f-estado", options=ESTADOS_FILTRO,
+                    multi=True, placeholder="Todos los estados")), md=2),
+            dbc.Col(_campo("Prioridad", "bi bi-exclamation-circle", dcc.Dropdown(id="act-f-prioridad",
+                    options=PRIORIDADES_FILTRO, multi=True, placeholder="Todas las prioridades")), md=2),
+            dbc.Col(_campo("Buscar", "bi bi-search", dbc.Input(id="act-f-buscar", type="text", debounce=True,
+                    placeholder="Buscar actividad...")), md=4),
+            dbc.Col(dbc.Button([html.I(className="bi bi-x-circle"), "Limpiar"], id="act-btn-limpiar-filtros",
+                    className="btn-cal-nav w-100 mt-4"), md=1),
+        ], className="g-2"),
+    ], className="act-filters-card"),
+    html.Div(className="kpi-grid act-kpi-grid", children=[
+        kpi_card("act-kpi-total", "Actividades", "bi bi-list-check", context_id="act-kpi-total-ctx"),
+        kpi_card("act-kpi-completadas", "Completadas", "bi bi-check2-circle", tone="tone-good", context_id="act-kpi-completadas-ctx"),
+        kpi_card("act-kpi-progreso", "En progreso", "bi bi-arrow-repeat", tone="tone-warning", context_id="act-kpi-progreso-ctx"),
+        kpi_card("act-kpi-pendientes", "Pendientes", "bi bi-flag", tone="tone-critical", context_id="act-kpi-pendientes-ctx"),
+        kpi_card("act-kpi-horas", "Horas registradas", "bi bi-clock-history", context_id="act-kpi-horas-ctx"),
+        kpi_card("act-kpi-proyectos", "Proyectos activos", "bi bi-folder2-open", context_id="act-kpi-proyectos-ctx"),
+    ]),
     chart_card([
         html.Div(className="hal-actions-row", children=[
             html.Div([html.I(className="bi bi-table"), "Histórico de actividades"], className="section-title"),
@@ -101,8 +131,6 @@ layout = html.Div(className="page", children=[
             dbc.Button([html.I(className="bi bi-trash"), "Eliminar"],
                         id="btn-eliminar-actividad", className="btn-refresh", disabled=True),
             html.Div(id="act-selection-msg", className="hal-selection-msg"),
-            dbc.Button([html.I(className="bi bi-plus-lg"), "Nueva actividad"],
-                        id="btn-nueva-actividad", className="btn-refresh ms-auto", n_clicks=0),
         ], style={"justifyContent": "space-between", "alignItems": "center"}),
         html.Div("Selecciona una fila con la casilla para editarla o eliminarla, o haz clic en cualquier celda "
                   "para ver el detalle completo. Ordena, filtra por columna o exporta a CSV con los controles "
@@ -190,18 +218,82 @@ def _actividad_card(idx: int, row: dict) -> html.Div:
 
 
 @dash.callback(
+    Output("act-f-proyecto", "options"),
+    Input("store-data", "data"),
+)
+def update_activity_filter_options(store_json):
+    df = df_from_store(store_json)
+    if df.empty:
+        return []
+    return [{"label": proyecto, "value": proyecto}
+            for proyecto in sorted(df["proyecto"].dropna().unique())]
+
+
+@dash.callback(
+    Output("act-f-proyecto", "value"),
+    Output("act-f-estado", "value"),
+    Output("act-f-prioridad", "value"),
+    Output("act-f-buscar", "value"),
+    Input("act-btn-limpiar-filtros", "n_clicks"),
+    prevent_initial_call=True,
+)
+def clear_activity_filters(_n_clicks):
+    return [], [], [], ""
+
+
+@dash.callback(
+    Output("act-kpi-total", "children"),
+    Output("act-kpi-total-ctx", "children"),
+    Output("act-kpi-completadas", "children"),
+    Output("act-kpi-completadas-ctx", "children"),
+    Output("act-kpi-progreso", "children"),
+    Output("act-kpi-progreso-ctx", "children"),
+    Output("act-kpi-pendientes", "children"),
+    Output("act-kpi-pendientes-ctx", "children"),
+    Output("act-kpi-horas", "children"),
+    Output("act-kpi-horas-ctx", "children"),
+    Output("act-kpi-proyectos", "children"),
+    Output("act-kpi-proyectos-ctx", "children"),
     Output("act-tabla", "data"),
     Output("act-tabla-cards", "children"),
     Input("store-data", "data"),
     Input("f-fechas", "start_date"),
     Input("f-fechas", "end_date"),
+    Input("act-f-proyecto", "value"),
+    Input("act-f-estado", "value"),
+    Input("act-f-prioridad", "value"),
+    Input("act-f-buscar", "value"),
 )
-def update_actividades(store_json, start_date, end_date):
+def update_actividades(store_json, start_date, end_date, proyectos, estados, prioridades, buscar):
     df = df_from_store(store_json)
     if df.empty:
-        return [], []
+        return "0", "Sin registros", "0", "0%", "0", "0%", "0", "0%", "0.0 h", "Sin horas", "0", "Sin proyectos", [], []
 
     filtered = apply_all_filters(df, start_date, end_date)
+    if proyectos:
+        filtered = filtered[filtered["proyecto"].isin(proyectos)]
+    if estados:
+        filtered = filtered[filtered["estado"].isin(estados)]
+    if prioridades:
+        filtered = filtered[filtered["prioridad"].isin(prioridades)]
+    if buscar and buscar.strip():
+        query = buscar.strip().lower()
+        searchable = ["actividad", "tema", "descripcion", "resultado", "proyecto"]
+        mask = pd.Series(False, index=filtered.index)
+        for col in searchable:
+            mask |= filtered[col].fillna("").astype(str).str.lower().str.contains(query, regex=False)
+        filtered = filtered[mask]
+
+    total = len(filtered)
+    completadas = int(filtered["estado"].eq("Completado").sum())
+    progreso = int(filtered["estado"].eq("En progreso").sum())
+    pendientes = int(filtered["estado"].eq("Pendiente").sum())
+    horas = float(filtered["horas"].dropna().sum())
+    dias_con_registro = max(int(filtered["fecha_inicio"].nunique()), 1)
+    proyectos_activos = int(filtered["proyecto"].dropna().nunique())
+
+    def porcentaje(valor):
+        return f"{valor / total * 100:.0f}% del período" if total else "0% del período"
 
     tabla = filtered.copy()
     tabla["fecha_txt"] = tabla["fecha_inicio"].dt.strftime("%d/%m/%Y")
@@ -214,7 +306,10 @@ def update_actividades(store_json, start_date, end_date):
             "actividad", "tema", "estado", "prioridad"]
     tabla_data = tabla[cols].to_dict("records")
     cards = [_actividad_card(i, fila) for i, fila in enumerate(tabla_data)]
-    return tabla_data, cards
+    return (str(total), "Resultado de los filtros", str(completadas), porcentaje(completadas),
+            str(progreso), porcentaje(progreso), str(pendientes), porcentaje(pendientes),
+            f"{horas:.1f} h", f"Promedio {horas / dias_con_registro:.1f} h/día" if total else "Sin horas",
+            str(proyectos_activos), "En el período filtrado", tabla_data, cards)
 
 
 @dash.callback(

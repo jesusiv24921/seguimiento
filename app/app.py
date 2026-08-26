@@ -22,7 +22,7 @@ from flask import request
 import ai_assistant
 import data as data_mod
 import knowledge as km
-from components import badge_estado, badge_prioridad
+from components import badge_conocimiento_estado, badge_estado, badge_prioridad
 from data_store import (df_from_store, df_to_store, hallazgos_to_store, issues_to_store,
                          knowledge_to_store, lookups_to_store)
 from theme import MESES_ES, fmt_rango_periodo
@@ -156,7 +156,8 @@ app.layout = html.Div(className="app-shell", children=[
             dbc.Button([html.I(className="bi bi-mortarboard-fill"), "Convertir en conocimiento"],
                         id="btn-convertir-conocimiento", className="btn-refresh", n_clicks=0),
         ]),
-    ], id="modal-actividad", is_open=False, size="lg", scrollable=True),
+    ], id="modal-actividad", is_open=False, size="lg", scrollable=True,
+       className="activity-detail-modal"),
 
     dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("Nuevo pendiente"), close_button=True),
@@ -372,18 +373,43 @@ def open_activity_modal(actividad_id, store_json):
     horas_r = 0.0 if pd.isna(r["horas"]) else r["horas"]
     horario = f"{r['hora_inicio_txt'] or '—'} — {r['hora_fin_txt'] or '—'}"
 
-    title = [html.I(className="bi bi-journal-text me-2"), r["actividad"]]
-    body = html.Div([
+    conocimientos = km.load_knowledge()
+    relacionados = conocimientos[
+        conocimientos["actividades_relacionadas"].fillna("").astype(str).str.split(",").apply(
+            lambda ids: actividad_id in [item.strip() for item in ids]
+        )
+    ]
+    conocimiento_relacionado = (
+        html.Div(className="activity-detail-related", children=[
+            html.Div([html.Span(k["conocimiento_id"], className="hal-card-motor"),
+                      html.Div(k["titulo"], className="fw-semibold"),
+                      badge_conocimiento_estado(k["estado"])])
+            for _, k in relacionados.iterrows()
+        ]) if not relacionados.empty else html.Div("No hay conocimiento relacionado registrado.",
+                                                   className="section-caption"))
+
+    title = [html.I(className="bi bi-journal-text me-2"), f"{actividad_id} — {r['actividad']}"]
+    body = html.Div(className="activity-detail-body", children=[
         html.Div([badge_estado(r["estado"]), badge_prioridad(r["prioridad"])],
-                  className="d-flex gap-2 mb-3"),
-        _modal_field("Proyecto", r["proyecto"]),
-        _modal_field("Tipo de actividad", r["tipo_actividad"]),
-        _modal_field("Categoría", r["categoria"]),
-        _modal_field("Fecha", f"{r['fecha_inicio'].strftime('%d/%m/%Y')} · {horario} · {horas_r:.1f} h"),
-        _modal_field("Tema", r["tema"]),
-        _modal_field("Descripción", r["descripcion"]),
-        _modal_field("Resultado", r["resultado"]),
-        _modal_field("Observaciones", r["observaciones"]),
+                 className="d-flex gap-2 mb-3"),
+        html.Div("Información", className="section-title"),
+        html.Div(className="activity-detail-fields", children=[
+            _modal_field("Fecha", r["fecha_inicio"].strftime("%d/%m/%Y")),
+            _modal_field("Horario", horario),
+            _modal_field("Duración", f"{horas_r:.1f} horas"),
+            _modal_field("Proyecto", r["proyecto"]),
+            _modal_field("Tema", r["tema"]),
+            _modal_field("Prioridad", r["prioridad"]),
+            _modal_field("Estado", r["estado"]),
+        ]),
+        html.Div("Descripción", className="section-title mt-3"),
+        html.Div(_modal_field("", r["descripcion"]) or "No registrada.", className="activity-detail-text"),
+        html.Div("Resultado", className="section-title mt-3"),
+        html.Div(_modal_field("", r["resultado"]) or "No se ha registrado un resultado.", className="activity-detail-text"),
+        html.Div("Conocimiento relacionado", className="section-title mt-3"),
+        conocimiento_relacionado,
+        html.Div("Observaciones", className="section-title mt-3"),
+        html.Div(_modal_field("", r["observaciones"]) or "No registradas.", className="activity-detail-text"),
     ])
     return True, title, body
 
