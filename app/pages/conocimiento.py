@@ -175,7 +175,7 @@ layout = html.Div(className="page", children=[
                            className="btn-refresh", size="sm", n_clicks=0),
             ], close_button=False, className="activity-detail-header"),
             dbc.ModalBody(id="con-detalle-body"),
-        ], id="modal-detalle-conocimiento", is_open=False, scrollable=True,
+        ], id="modal-detalle-conocimiento", is_open=False, scrollable=True, backdrop=False,
            className="knowledge-detail-modal"),
     ]),
 
@@ -1090,7 +1090,6 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     ])
 
     return html.Div([
-        html.Div(r["titulo"], id="con-detalle-titulo", className="section-title mb-2", style={"fontSize": "1.05rem"}),
         html.Div(className="con-detalle-secciones", children=[
             html.Div(tab_resumen, className="con-detalle-seccion"),
             html.Div([html.Div("Contenido", className="section-title"), *tab_contenido],
