@@ -1159,7 +1159,12 @@ def abrir_detalle_conocimiento(n_clicks, item_clicks_list, contents_list, filena
     prevent_initial_call=True,
 )
 def cerrar_detalle_conocimiento(_n_clicks):
-    """Cierra un panel que ya fue renderizado."""
+    """Cierra un panel únicamente después de un clic real en su botón."""
+    # Dash puede disparar el callback cuando el botón se inserta dinámicamente
+    # con n_clicks=0. Ese evento inicial no debe cerrar el detalle recién
+    # abierto.
+    if not _n_clicks:
+        return dash.no_update, dash.no_update
     return "con-detalle-panel", _estado_vacio_detalle()
 
 
