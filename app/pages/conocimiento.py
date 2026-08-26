@@ -64,17 +64,19 @@ layout = html.Div(className="page", children=[
                 kpi_card("con-kpi-revisar", "Por revisar", "bi bi-flag", tone="tone-critical"),
             ], className="kpi-grid"),
 
+            html.Div(className="con-overview-grid", children=[
             chart_card([
                 html.Div([html.I(className="bi bi-book"), "Estoy estudiando"], className="section-title"),
                 html.Div("Conocimientos en estudio o en progreso, con tu avance por concepto.",
                           className="section-caption"),
                 html.Div(id="con-estudiando-cards", className="hal-cards-grid"),
-            ]),
+            ], className="con-overview-card"),
 
             chart_card([
                 html.Div([html.I(className="bi bi-clock-history"), "Conocimiento reciente"], className="section-title"),
                 html.Div("Últimas entradas creadas o actualizadas.", className="section-caption"),
                 html.Div(id="con-recientes-lista", className="con-reciente-lista"),
+            ], className="con-overview-card"),
             ]),
 
             html.Div(className="filters-panel", children=[
@@ -172,8 +174,10 @@ layout = html.Div(className="page", children=[
             dbc.ModalHeader([
                 dbc.ModalTitle(id="con-detalle-title"),
                 dbc.Button(html.I(className="bi bi-x-lg"), id="btn-cerrar-detalle-conocimiento",
-                           className="btn-refresh", size="sm", n_clicks=0),
-            ], close_button=False, className="activity-detail-header"),
+                           className="btn-refresh con-detail-close", size="sm", n_clicks=0,
+                           style={"position": "absolute", "top": "0.85rem", "right": "1.25rem"}),
+            ], close_button=False, className="activity-detail-header",
+               style={"position": "relative", "paddingRight": "5rem"}),
             dbc.ModalBody(id="con-detalle-body"),
         ], id="modal-detalle-conocimiento", is_open=False, scrollable=True, backdrop=False,
            className="knowledge-detail-modal",
