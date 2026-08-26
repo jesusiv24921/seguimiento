@@ -610,8 +610,6 @@ def update_conocimiento_selection(selected_rows, table_data):
     Output("modal-eliminar-conocimiento", "is_open", allow_duplicate=True),
     Output("con-form-error", "children", allow_duplicate=True),
     Output("con-tabla", "selected_rows", allow_duplicate=True),
-    Output("con-detalle-panel", "className", allow_duplicate=True),
-    Output("con-detalle-body", "children", allow_duplicate=True),
     Output("con-clicks-baseline", "data"),
     Input("url", "pathname"),
     State("btn-nuevo-conocimiento", "n_clicks"),
@@ -623,13 +621,16 @@ def update_conocimiento_selection(selected_rows, table_data):
 )
 def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_ver, n_importar):
     if pathname != "/conocimiento":
-        return (dash.no_update,) * 8
+        return (dash.no_update,) * 6
     baseline = {
         "btn-nuevo-conocimiento": n_nuevo or 0, "btn-editar-conocimiento": n_editar or 0,
         "btn-eliminar-conocimiento": n_eliminar or 0, "btn-ver-conocimiento": n_ver or 0,
         "btn-importar-conocimiento": n_importar or 0,
     }
-    return False, False, False, None, [], "con-detalle-panel", _estado_vacio_detalle(), baseline
+    # El panel de detalle ya nace vacío en el layout. No se actualiza desde
+    # este callback para que su respuesta tardía no borre una selección que
+    # el usuario acaba de abrir.
+    return False, False, False, None, [], baseline
 
 
 # ==========================================================================
