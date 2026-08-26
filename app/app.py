@@ -148,7 +148,11 @@ app.layout = html.Div(className="app-shell", children=[
     ]),
 
     dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle(id="modal-actividad-title"), close_button=True),
+    dbc.ModalHeader([
+        dbc.ModalTitle(id="modal-actividad-title"),
+        dbc.Button(html.I(className="bi bi-x-lg"), id="btn-cerrar-detalle-actividad",
+                   className="btn-refresh", size="sm", n_clicks=0),
+    ], close_button=False, className="activity-detail-header"),
         dbc.ModalBody(id="modal-actividad-body"),
         dbc.ModalFooter([
             dbc.Button([html.I(className="bi bi-flag-fill"), "Generar pendiente desde esta actividad"],
@@ -412,6 +416,16 @@ def open_activity_modal(actividad_id, store_json):
         html.Div(_modal_field("", r["observaciones"]) or "No registradas.", className="activity-detail-text"),
     ])
     return True, title, body
+
+
+@app.callback(
+    Output("modal-actividad", "is_open", allow_duplicate=True),
+    Input("btn-cerrar-detalle-actividad", "n_clicks"),
+    prevent_initial_call=True,
+)
+def close_activity_detail(n_clicks):
+    """Cierra el panel lateral de actividad después de un clic explícito."""
+    return False if n_clicks else dash.no_update
 
 
 # --------------------------------------------------------------------------
