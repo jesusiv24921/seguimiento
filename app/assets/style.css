@@ -1129,27 +1129,77 @@ body {
 .empty-state.tone-good i { color: var(--good); }
 
 /* ---------------------------------------------------------------------
-   Flujo conceptual (página Sentinel Alerts)
+   Flujo conceptual (página Sentinel Alerts) — banda compacta de una sola
+   fila con una etiqueta a la izquierda, en vez de una tarjeta propia.
 --------------------------------------------------------------------- */
+.flow-band {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    padding: 0.55rem 0.9rem;
+    margin-bottom: 1.1rem;
+}
+.flow-band-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+    flex-shrink: 0;
+}
 .flow-diagram {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    padding: 0.5rem 0 0.75rem 0;
+    gap: 0.35rem;
 }
-.flow-step-wrap { display: flex; align-items: center; gap: 0.5rem; }
+.flow-step-wrap { display: flex; align-items: center; gap: 0.35rem; }
 .flow-step {
     background-color: var(--surface-sunken);
     border: 1px solid var(--border-hairline-strong);
     border-radius: 999px;
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.74rem;
     font-weight: 700;
     color: var(--ink-secondary);
     white-space: nowrap;
 }
-.flow-arrow { color: var(--ink-muted); font-size: 0.9rem; }
+.flow-arrow { color: var(--ink-muted); font-size: 0.78rem; }
+
+/* Sentinel Alerts: "Estado actual" y "Requiere atención" */
+.sen-estado-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.sen-estado-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--ink-secondary); }
+.sen-estado-row i { width: 16px; text-align: center; }
+.sen-estado-row.tone-good i { color: var(--good); }
+.sen-estado-row.tone-warning i { color: var(--warning); }
+.sen-estado-row.tone-critical i { color: var(--critical); }
+.sen-estado-foco {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border-hairline);
+}
+.sen-estado-foco-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-muted);
+    margin-bottom: 0.2rem;
+}
+.sen-estado-foco-valor { font-size: 0.85rem; color: var(--ink-primary); font-weight: 600; }
+
+.sen-atencion-list { display: flex; flex-direction: column; gap: 0.55rem; }
+.sen-atencion-row { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.85rem; }
+.sen-atencion-row i { margin-top: 0.15rem; flex-shrink: 0; }
+.sen-atencion-row.tone-critical i { color: var(--critical); }
+.sen-atencion-row.tone-warning i { color: var(--warning); }
+.sen-atencion-titulo { color: var(--ink-primary); font-weight: 600; }
+.sen-atencion-meta { color: var(--ink-muted); font-size: 0.78rem; }
 
 /* ---------------------------------------------------------------------
    Hallazgos: acciones sobre la tabla (seleccionar + cerrar)
