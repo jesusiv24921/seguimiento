@@ -392,13 +392,14 @@ def close_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descrip
 
 def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripcion: str,
                   estado: str, fecha_hallazgo: dt.date | None = None,
+                  fecha_cierre: dt.date | None = None,
                   path: Path | str | None = None) -> tuple[bool, str]:
     """Agrega una fila nueva al final de HALLAZGOS. Rechaza el alta si ya
     existe un hallazgo idéntico (misma combinación Proyecto+Motor+Script+
     Función+Descripción), porque close_hallazgo() identifica los registros
     por esa combinación y dos filas iguales lo volverían ambiguo.
-    fecha_hallazgo, si no se da, se registra como hoy. Fecha cierre queda
-    vacía: solo se llena cuando el hallazgo se cierra de verdad."""
+    fecha_hallazgo, si no se da, se registra como hoy. fecha_cierre permite
+    conservar un cierre histórico durante una importación CSV."""
     path = path if path is not None else EXCEL_PATH
     fecha_hallazgo = fecha_hallazgo or dt.date.today()
 
@@ -432,11 +433,12 @@ def add_hallazgo(proyecto: str, motor: str, script: str, funcion: str, descripci
 
     fila = ws.max_row + 1
     valores = {"Proyecto": proyecto, "Motor": motor, "Script": script, "Función": funcion,
-               "Descripción": descripcion, "Estado": estado, "Fecha hallazgo": fecha_hallazgo}
+               "Descripción": descripcion, "Estado": estado, "Fecha hallazgo": fecha_hallazgo,
+               "Fecha cierre": fecha_cierre}
     for nombre, valor in valores.items():
         celda = ws.cell(row=fila, column=col_idx[nombre])
         celda.value = valor
-        if nombre == "Fecha hallazgo":
+        if nombre in ("Fecha hallazgo", "Fecha cierre"):
             celda.number_format = "DD/MM/YYYY"
 
     try:

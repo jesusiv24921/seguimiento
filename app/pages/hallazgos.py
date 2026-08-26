@@ -16,6 +16,7 @@ from dash import ALL, Input, Output, State, dash_table, dcc, html
 
 import charts
 import data as data_mod
+from hallazgos_import import template_csv, validate_hallazgos_csv
 import knowledge as km
 from components import badge_hallazgo_estado, badge_proyecto, chart_card, kpi_card, page_header
 from data_store import hallazgos_from_store, hallazgos_to_store, knowledge_to_store, lookups_from_store
@@ -93,6 +94,8 @@ layout = html.Div(className="page", children=[
             dbc.Button([html.I(className="bi bi-mortarboard-fill"), "Convertir en conocimiento"],
                         id="btn-convertir-conocimiento-hallazgo", className="btn-refresh", disabled=True),
             html.Div(id="hal-selection-msg", className="hal-selection-msg"),
+            dbc.Button([html.I(className="bi bi-upload"), "Importar hallazgos"],
+                        id="btn-importar-hallazgos", className="btn-cal-nav", n_clicks=0),
             dbc.Button([html.I(className="bi bi-plus-lg"), "Nuevo hallazgo"],
                         id="btn-nuevo-hallazgo", className="btn-refresh ms-auto", n_clicks=0),
         ]),
@@ -140,6 +143,8 @@ layout = html.Div(className="page", children=[
 
     dcc.Store(id="store-hallazgo-seleccionado"),
     dcc.Store(id="hal-clicks-baseline"),
+    dcc.Store(id="hal-import-preview"),
+    dcc.Download(id="hal-download-template"),
 
     dbc.Modal([
         dbc.ModalHeader([
@@ -198,6 +203,65 @@ layout = html.Div(className="page", children=[
                         id="btn-guardar-nuevo-hallazgo", className="btn-refresh", n_clicks=0),
         ]),
     ], id="modal-nuevo-hallazgo", is_open=False, size="lg", scrollable=True),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle([html.I(className="bi bi-upload me-2"), "Importar hallazgos desde CSV"]),
+                        close_button=True),
+        dbc.ModalBody([
+            html.Div("Carga el archivo, revisa los resultados y selecciona los registros válidos antes de importarlos.",
+                     className="section-caption mb-3"),
+            html.Div([html.Div("Proyecto de destino", className="filter-label"),
+                      dcc.Dropdown(id="hal-import-proyecto", placeholder="Selecciona un proyecto")], className="mb-3"),
+            dcc.Upload(id="hal-import-upload", multiple=False, children=html.Div([
+                html.I(className="bi bi-file-earmark-arrow-up me-2"), "Seleccionar archivo CSV"
+            ]), className="con-upload-zone"),
+            html.Div([html.Strong("Formato esperado: "),
+                      "Estado | Fecha hallazgo | Fecha cierre | Motor | Script | Función | Descripción"],
+                     className="section-caption mt-2"),
+            dbc.Button([html.I(className="bi bi-download me-1"), "Descargar plantilla CSV"],
+                       id="hal-btn-descargar-plantilla", className="btn-cal-nav btn-sm mt-2", n_clicks=0),
+            html.Div(id="hal-import-error", className="mt-3"),
+            html.Div(id="hal-import-summary", className="mt-3"),
+            html.Div([
+                dbc.Button("Seleccionar todos", id="hal-import-select-all", className="btn-cal-nav btn-sm", n_clicks=0),
+                dbc.Button("Deseleccionar todos", id="hal-import-select-none", className="btn-cal-nav btn-sm ms-2", n_clicks=0),
+            ], id="hal-import-selection-actions", className="mt-2", style={"display": "none"}),
+            dash_table.DataTable(
+                id="hal-import-table",
+                columns=[
+                    {"name": "Estado", "id": "estado_importacion"},
+                    {"name": "Detalle", "id": "detalle"},
+                    {"name": "Estado hallazgo", "id": "Estado"},
+                    {"name": "Motor", "id": "Motor"},
+                    {"name": "Script", "id": "Script"},
+                    {"name": "Función", "id": "Función"},
+                    {"name": "Descripción", "id": "Descripción"},
+                ],
+                row_selectable="multi", page_size=8, style_as_list_view=True,
+                style_table={"overflowX": "auto", "marginTop": "12px"},
+                style_cell={"fontFamily": "Inter, system-ui, sans-serif", "fontSize": "0.82rem",
+                            "padding": "8px", "whiteSpace": "normal", "height": "auto"},
+                style_data_conditional=[
+                    {"if": {"filter_query": '{estado_importacion} = "Error"'}, "backgroundColor": "#fff2f2"},
+                    {"if": {"filter_query": '{estado_importacion} = "Válido"'}, "backgroundColor": "#f3fbf5"},
+                ],
+            ),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="hal-btn-cancelar-import", className="btn-cal-nav", n_clicks=0),
+            dbc.Button([html.I(className="bi bi-check2 me-1"), "Importar seleccionados"],
+                       id="hal-btn-importar-seleccionados", className="btn-refresh", n_clicks=0, disabled=True),
+        ]),
+    ], id="modal-importar-hallazgos", is_open=False, size="xl", scrollable=True),
+
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Confirmar importación"), close_button=True),
+        dbc.ModalBody(id="hal-import-confirm-body"),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="hal-btn-cancelar-confirm-import", className="btn-cal-nav", n_clicks=0),
+            dbc.Button("Sí, importar", id="hal-btn-confirmar-import", className="btn-refresh", n_clicks=0),
+        ]),
+    ], id="modal-confirmar-importacion", is_open=False),
 
     dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("Editar hallazgo"), close_button=True),
@@ -629,12 +693,13 @@ def confirm_close(n_clicks, seleccionado):
 @dash.callback(
     Output("hal-form-proyecto", "options"),
     Output("hal-edit-form-proyecto", "options"),
+    Output("hal-import-proyecto", "options"),
     Input("store-lookups", "data"),
 )
 def update_hallazgo_form_proyecto_options(lookups_json):
     lookups = lookups_from_store(lookups_json)
     opts = [{"label": r["proyecto"], "value": r["proyecto"]} for r in lookups["proyectos"]]
-    return opts, opts
+    return opts, opts, opts
 
 
 # --------------------------------------------------------------------------
@@ -950,3 +1015,162 @@ def cerrar_modales_al_entrar(pathname, n_nuevo, n_editar, n_eliminar, n_cerrar):
         "btn-cerrar-hallazgo": n_cerrar or 0,
     }
     return False, False, False, False, False, None, None, [], baseline
+
+
+# --------------------------------------------------------------------------
+# Importación CSV: vista previa y persistencia mediante data.add_hallazgo
+# --------------------------------------------------------------------------
+@dash.callback(
+    Output("modal-importar-hallazgos", "is_open"),
+    Input("btn-importar-hallazgos", "n_clicks"),
+    prevent_initial_call=True,
+)
+def abrir_importacion_hallazgos(n_clicks):
+    return bool(n_clicks)
+
+
+@dash.callback(
+    Output("modal-importar-hallazgos", "is_open", allow_duplicate=True),
+    Input("hal-btn-cancelar-import", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancelar_importacion_hallazgos(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("hal-download-template", "data"),
+    Input("hal-btn-descargar-plantilla", "n_clicks"),
+    prevent_initial_call=True,
+)
+def descargar_plantilla_hallazgos(_n_clicks):
+    return dict(content=template_csv(), filename="plantilla_hallazgos_sentinel.csv", type="text/csv")
+
+
+@dash.callback(
+    Output("hal-import-preview", "data"),
+    Output("hal-import-error", "children"),
+    Output("hal-import-summary", "children"),
+    Output("hal-import-table", "data"),
+    Output("hal-import-table", "selected_rows"),
+    Output("hal-import-selection-actions", "style"),
+    Input("hal-import-upload", "contents"),
+    State("hal-import-upload", "filename"),
+    State("hal-import-proyecto", "value"),
+    State("store-hallazgos", "data"),
+    prevent_initial_call=True,
+)
+def previsualizar_importacion_hallazgos(contents, filename, proyecto, store_json):
+    if not contents:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    resultado = validate_hallazgos_csv(
+        contents, filename, hallazgos_from_store(store_json).to_dict("records"), proyecto
+    )
+    if resultado["error"]:
+        error = dbc.Alert(resultado["error"], color="danger", className="mb-0")
+        return [], error, None, [], [], {"display": "none"}
+
+    rows = resultado["rows"]
+    validos = sum(row["valido"] for row in rows)
+    duplicados = sum(row["duplicado"] for row in rows)
+    errores = len(rows) - validos
+    summary = dbc.Alert([
+        html.Strong(f"Archivo: {filename}. "),
+        f"{len(rows)} registros encontrados · ",
+        html.Span(f"✓ {validos} válidos", className="me-2"),
+        html.Span(f"⚠ {duplicados} posibles duplicados", className="me-2"),
+        html.Span(f"✕ {errores} con error"),
+    ], color="light", className="mb-0")
+    selected = [index for index, row in enumerate(rows) if row["valido"]]
+    return rows, None, summary, rows, selected, {"display": "block"}
+
+
+@dash.callback(
+    Output("hal-import-table", "selected_rows", allow_duplicate=True),
+    Input("hal-import-select-all", "n_clicks"),
+    Input("hal-import-select-none", "n_clicks"),
+    State("hal-import-preview", "data"),
+    prevent_initial_call=True,
+)
+def seleccionar_registros_importacion(_select_all, _select_none, rows):
+    if dash.ctx.triggered_id == "hal-import-select-none":
+        return []
+    return [index for index, row in enumerate(rows or []) if row.get("valido")]
+
+
+@dash.callback(
+    Output("hal-btn-importar-seleccionados", "disabled"),
+    Input("hal-import-table", "selected_rows"),
+    State("hal-import-preview", "data"),
+)
+def habilitar_importacion_hallazgos(selected_rows, rows):
+    return not any((rows or [])[index].get("valido") for index in (selected_rows or []) if index < len(rows or []))
+
+
+@dash.callback(
+    Output("modal-confirmar-importacion", "is_open"),
+    Output("hal-import-confirm-body", "children"),
+    Input("hal-btn-importar-seleccionados", "n_clicks"),
+    State("hal-import-table", "selected_rows"),
+    State("hal-import-preview", "data"),
+    prevent_initial_call=True,
+)
+def confirmar_importacion_hallazgos(n_clicks, selected_rows, rows):
+    seleccionados = [rows[index] for index in (selected_rows or []) if index < len(rows or []) and rows[index].get("valido")]
+    if not n_clicks or not seleccionados:
+        return False, dash.no_update
+    return True, f"Se importarán {len(seleccionados)} hallazgos al proyecto seleccionado. ¿Deseas continuar?"
+
+
+@dash.callback(
+    Output("modal-confirmar-importacion", "is_open", allow_duplicate=True),
+    Input("hal-btn-cancelar-confirm-import", "n_clicks"),
+    prevent_initial_call=True,
+)
+def cancelar_confirmacion_importacion(_n_clicks):
+    return False
+
+
+@dash.callback(
+    Output("store-hallazgos", "data", allow_duplicate=True),
+    Output("modal-importar-hallazgos", "is_open", allow_duplicate=True),
+    Output("modal-confirmar-importacion", "is_open", allow_duplicate=True),
+    Output("hal-toast", "children", allow_duplicate=True),
+    Output("hal-toast", "icon", allow_duplicate=True),
+    Output("hal-toast", "is_open", allow_duplicate=True),
+    Input("hal-btn-confirmar-import", "n_clicks"),
+    State("hal-import-proyecto", "value"),
+    State("hal-import-table", "selected_rows"),
+    State("hal-import-preview", "data"),
+    prevent_initial_call=True,
+)
+def importar_hallazgos_csv(n_clicks, proyecto, selected_rows, rows):
+    if not n_clicks:
+        return (dash.no_update,) * 6
+    seleccionados = [rows[index] for index in (selected_rows or []) if index < len(rows or []) and rows[index].get("valido")]
+    if not proyecto or not seleccionados:
+        return dash.no_update, True, False, "No hay registros válidos seleccionados para importar.", "danger", True
+
+    importados, errores = 0, []
+    for row in seleccionados:
+        try:
+            ok, message = data_mod.add_hallazgo(
+                proyecto=proyecto, motor=row["Motor"], script=row["Script"], funcion=row["Función"],
+                descripcion=row["Descripción"], estado=row["Estado"],
+                fecha_hallazgo=dt.date.fromisoformat(row["Fecha hallazgo"]),
+                fecha_cierre=dt.date.fromisoformat(row["Fecha cierre"]) if row["Fecha cierre"] else None,
+            )
+        except (TypeError, ValueError):
+            ok, message = False, f"Fila {row['linea']}: no fue posible procesar las fechas."
+        if ok:
+            importados += 1
+        else:
+            errores.append(f"Fila {row['linea']}: {message}")
+
+    nuevo_store = hallazgos_to_store(data_mod.load_hallazgos()) if importados else dash.no_update
+    if errores:
+        message = f"{importados} hallazgos importados. {len(errores)} registro(s) no pudieron ser procesados: " + " ".join(errores[:3])
+        icon = "warning" if importados else "danger"
+    else:
+        message, icon = f"✓ {importados} hallazgos importados correctamente.", "success"
+    return nuevo_store, False, False, message, icon, True
