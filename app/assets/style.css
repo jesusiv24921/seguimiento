@@ -1003,6 +1003,7 @@ body {
     visibility: hidden;
 }
 .con-detalle-panel.con-detalle-abierto { transform: translateX(0); visibility: visible; }
+.con-detalle-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.35rem; }
 .con-detalle-cerrar-btn { display: inline-flex; }
 .con-detalle-etiquetas { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.9rem 0; }
 .con-detalle-secciones { display: flex; flex-direction: column; gap: 1rem; }

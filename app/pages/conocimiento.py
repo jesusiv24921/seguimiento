@@ -169,6 +169,10 @@ layout = html.Div(className="page", children=[
         ]),
 
         html.Div(id="con-detalle-panel", className="con-detalle-panel", children=[
+            html.Div(className="con-detalle-toolbar", children=[
+                dbc.Button(html.I(className="bi bi-x-lg"), id="con-detalle-cerrar",
+                           className="btn-refresh con-detalle-cerrar-btn", size="sm", n_clicks=0),
+            ]),
             html.Div(id="con-detalle-body", children=[
                 html.Div(className="empty-state", children=[
                     html.I(className="bi bi-journal-text"),
@@ -1089,11 +1093,7 @@ def _construir_detalle(conocimiento_id: str, actividades_json) -> html.Div:
     ])
 
     return html.Div([
-        html.Div(className="d-flex justify-content-between align-items-start mb-2", children=[
-            html.Div(r["titulo"], id="con-detalle-titulo", className="section-title", style={"fontSize": "1.05rem"}),
-            dbc.Button(html.I(className="bi bi-x-lg"), id="con-detalle-cerrar",
-                        className="btn-refresh con-detalle-cerrar-btn", size="sm", n_clicks=0),
-        ]),
+        html.Div(r["titulo"], id="con-detalle-titulo", className="section-title mb-2", style={"fontSize": "1.05rem"}),
         html.Div(className="con-detalle-secciones", children=[
             html.Div(tab_resumen, className="con-detalle-seccion"),
             html.Div([html.Div("Contenido", className="section-title"), *tab_contenido],
