@@ -176,7 +176,10 @@ layout = html.Div(className="page", children=[
             ], close_button=False, className="activity-detail-header"),
             dbc.ModalBody(id="con-detalle-body"),
         ], id="modal-detalle-conocimiento", is_open=False, scrollable=True, backdrop=False,
-           className="knowledge-detail-modal"),
+           className="knowledge-detail-modal",
+           dialog_style={"position": "fixed", "top": 0, "right": 0, "bottom": 0,
+                         "width": "min(100vw, 1100px)", "maxWidth": "none", "height": "100vh", "margin": 0},
+           content_style={"height": "100vh", "borderRadius": 0}),
     ]),
 
     dcc.Store(id="store-conocimiento-seleccionado"),
