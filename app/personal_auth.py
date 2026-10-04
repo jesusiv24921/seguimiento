@@ -55,7 +55,7 @@ button{background:#2464bb;color:white;cursor:pointer}a{color:#2464bb}.error{colo
 {% if unlocked %}<p>Tu acceso personal está desbloqueado.</p><p><a href="/personal">Volver a mis finanzas</a></p>
 <form method="post" action="/personal/lock"><input type="hidden" name="csrf" value="{{csrf}}">
 <button type="submit">Bloquear Personal</button></form>
-{% elif configured %}<p>Ingresa tu clave personal, diferente de la clave del programa.</p>
+{% elif configured %}<p>Ingresa tu clave de Personal.</p>
 <form method="post"><input type="hidden" name="csrf" value="{{csrf}}">
 <label for="password">Clave de Personal</label><input id="password" name="password" type="password"
 autocomplete="current-password" required maxlength="512" autofocus><button type="submit">Entrar a Personal</button></form>
@@ -106,7 +106,7 @@ def install(server):
                     valid = bool(encoded and password and len(password) <= 512 and check_password_hash(encoded, password))
                 except (ValueError, TypeError):
                     valid = False
-                if valid and password != os.environ.get("SEGUIMIENTO_AUTH_PASSWORD"):
+                if valid:
                     session["personal_access"] = {"credential": fingerprint(), "until": now + SESSION_SECONDS}
                     session["personal_csrf"] = secrets.token_urlsafe(32)
                     with _lock:

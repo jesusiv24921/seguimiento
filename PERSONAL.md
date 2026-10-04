@@ -109,8 +109,8 @@ python -c "from getpass import getpass; from werkzeug.security import generate_p
 
 La entrada no se muestra en pantalla. Copiar el resultado completo como valor de
 `PERSONAL_PASSWORD_HASH` en las variables de entorno del servicio de Render, sin
-comillas adicionales. Elegir una clave distinta a la del programa; el acceso se
-rechaza si ambas coinciden. No guardar la clave ni el hash en Git o en este documento.
+comillas adicionales. La clave puede coincidir con la del programa, aunque Personal
+requiere su propio desbloqueo. No guardar la clave ni el hash en Git o en este documento.
 Para local, configurar esa misma variable en el entorno del proceso antes de arrancar.
 
 Configurar también `SEGUIMIENTO_SECRET_KEY` con un valor aleatorio privado y estable

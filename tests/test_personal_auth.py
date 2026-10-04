@@ -72,9 +72,11 @@ class PersonalAuthTests(unittest.TestCase):
             self.assertEqual(self.login("wrong").status_code, 401)
         self.assertEqual(self.login().status_code, 429)
 
-    def test_same_password_configuration_rejected(self):
+    def test_same_password_configuration_allowed(self):
         with patch.dict(os.environ, {"SEGUIMIENTO_AUTH_PASSWORD": "private-test-password"}):
-            self.assertEqual(self.login().status_code, 401)
+            self.assertEqual(self.client.get("/protected").status_code, 403)
+            self.assertEqual(self.login().status_code, 303)
+            self.assertEqual(self.client.get("/protected").status_code, 200)
 
     def test_cross_origin_write_blocked(self):
         self.login()
