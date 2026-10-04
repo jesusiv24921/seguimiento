@@ -49,5 +49,26 @@ class PersonalAccessTests(unittest.TestCase):
         with self.module.server.test_request_context("/", method="POST", headers={"Origin": "http://localhost"}):
             self.assertEqual(callback(), "ok")
 
+    def test_payment_table_keeps_future_payment_visible_in_other_month(self):
+        from datetime import date
+        import personal as finance
+        import pages.personal as page
+        data = finance.empty()
+        data["deudas"] = [dict(id="debt-123456", nombre="Compra A", entidad="Banco", saldo_inicial=1000000,
+                               saldo_actual=500000, fecha_inicio="2026-10-01")]
+        data["movimientos"] = [dict(id="payment", fecha="2026-11-01", deuda="debt-123456",
+                                    tipo_movimiento="Abono dirigido a capital", valor=500000, capital=500000, observaciones="Prueba")]
+        with patch.object(finance, "today", return_value=date(2026, 10, 4)), self.module.server.test_request_context("/personal"):
+            result = page.render_table(data, "movimientos", 2026, 10)
+            self.assertEqual(len(result.data), 1)
+            self.assertEqual(result.data[0]["id"], "payment")
+            self.assertIn("Compra A", result.data[0]["deuda"])
+            self.assertEqual(result.data[0]["fecha_estado"], "Fecha futura")
+            debts = page.render_table(data, "deudas", 2026, 10)
+            self.assertEqual(debts.data[0]["saldo_actual"], 1000000)
+            self.assertEqual(debts.data[0]["saldo_registrado"], 500000)
+            self.assertIsNone(page.render_debt_plan(data, "movimientos")[0])
+            self.assertEqual(data["movimientos"][0]["deuda"], "debt-123456")
+
 if __name__ == "__main__":
     unittest.main()

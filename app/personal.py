@@ -251,6 +251,20 @@ def debt_balances(data, cutoff="9999-12-31"):
     return balances
 
 
+def debt_label(data, debt_id):
+    debt = next((d for d in data["deudas"] if d["id"] == debt_id), None)
+    if not debt:
+        return "Deuda no encontrada"
+    return f"{debt['nombre']} · {debt['entidad']} · inicial {cop(debt['saldo_inicial'])} · {debt_id[-6:]}"
+
+
+def payment_history(data, as_of=None):
+    as_of = as_of or today().isoformat()
+    return [dict(m, deuda=debt_label(data, m["deuda"]),
+                 fecha_estado="Fecha futura" if m["fecha"] > as_of else "Registrado a hoy")
+            for m in sorted(data["movimientos"], key=lambda r: (r["fecha"], r["id"]), reverse=True)]
+
+
 def mutate(kind, row=None, delete_id=None, expected=None, path=None, batch=None):
     """Transacción dentro del único worker de Render, con revisión optimista."""
     path = Path(path) if path else storage_path()

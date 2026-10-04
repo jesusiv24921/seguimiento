@@ -18,7 +18,8 @@ dash.register_page(__name__, path="/personal", name="Personal", title="Personal 
 LABELS = {"gastos_diarios": "Gastos diarios", "ingresos": "Ingresos", "gastos": "Presupuesto y gastos previos", "deudas": "Deudas",
           "plan_deuda": "Plan de salida de deuda", "movimientos": "Pagos y abonos", "proyecciones": "Proyección", "categorias": "Categorías"}
 FIELD_LABELS = {"tasa_EA": "Tasa E.A. (%)", "capital": "Capital incluido en el pago",
-                "saldo_inicial": "Saldo al inicio del registro", "saldo_actual": "Saldo actual (calculado)",
+                "saldo_inicial": "Saldo al inicio del registro", "saldo_actual": "Saldo actual (a hoy)",
+                "saldo_registrado": "Saldo incluyendo fechas futuras", "fecha_estado": "Estado de la fecha",
                 "fecha_inicio": "Fecha del saldo inicial", "deuda": "Deuda",
                 "ejecucion": "% ejecución", "fecha": "Fecha", "padre": "Categoría principal (opcional)",
                 "categoria": "Categoría", "descripcion": "Descripción",
@@ -39,7 +40,7 @@ def label(key):
 def table(rows, columns=None, **kwargs):
     columns = columns or (list(rows[0]) if rows else [])
     money = finance.MONEY | {"planeado", "real", "diferencia", "liquidez_restante", "saldo_proyectado",
-                             "abono_real", "disponible_real", "liquidez_planeada", "liquidez_real", "diferencia_liquidez", "saldo_real"}
+                             "abono_real", "disponible_real", "liquidez_planeada", "liquidez_real", "diferencia_liquidez", "saldo_real", "saldo_registrado"}
     return dash_table.DataTable(
         data=rows, columns=[dict(name=label(c), id=c, **({"type": "numeric", "format": COP} if c in money else {})) for c in columns if c != "id"],
         sort_action="native", page_size=12, style_table={"overflowX": "auto"},
@@ -75,6 +76,8 @@ def layout():
             html.P("En Gastos diarios registra cada pago: por ejemplo, Taxi, $20.000 y su fecha. Se suma automáticamente al real de la categoría y del mes. "
                    "En Presupuesto y gastos previos conserva el planeado; el valor real manual es solo para pagos que no están en el diario. No registres el mismo pago en ambos lugares.", className="section-caption"),
             dcc.Tabs(id="per-kind", value="gastos_diarios", children=[dcc.Tab(label=v, value=k) for k, v in LABELS.items()]),
+            html.Div(id="per-payment-help", className="my-3"),
+            dbc.Button("Ver, editar o eliminar pagos y abonos", id="per-open-payments", outline=True, className="my-2", style={"display": "none"}),
             html.Div(id="per-debt-plan", className="my-3"),
             html.Div(id="per-plan-import", style={"display": "none"}, children=[
                 html.Details(children=[html.Summary("Importar meses nuevos del plan"),
@@ -147,7 +150,7 @@ def render_table(data, kind, year, month):
     rows = deepcopy(data[kind])
     if kind == "plan_deuda":
         rows.sort(key=lambda r: r["fecha"])
-    if kind in ("ingresos", "gastos", "movimientos", "gastos_diarios"):
+    if kind in ("ingresos", "gastos", "gastos_diarios"):
         rows = [r for r in rows if r["fecha"][:7] == f"{int(year or 0):04d}-{int(month or 1):02d}"]
     if kind in ("ingresos", "gastos"):
         for r in rows:
@@ -161,13 +164,22 @@ def render_table(data, kind, year, month):
         for r in rows:
             r["padre"] = finance.category_label(data, r["padre"]) if r["padre"] else "—"
     columns = finance.SCHEMAS[kind] + (["diferencia"] if kind in ("ingresos", "gastos") else [])
+    if kind == "movimientos":
+        rows = finance.payment_history(data)
+        columns = finance.SCHEMAS[kind] + ["fecha_estado"]
+    if kind == "deudas":
+        balances = finance.debt_balances(data, finance.today().isoformat())
+        for r in rows:
+            r["saldo_registrado"] = r["saldo_actual"]
+            r["saldo_actual"] = balances.get(r["id"], 0)
+        columns = finance.SCHEMAS[kind] + ["saldo_registrado"]
     return table(rows, columns, id="per-records", row_selectable="single", selected_rows=[], selected_row_ids=[])
 
 
 def defaults(kind, year, month):
     result = {key: 0 if key in finance.MONEY or key in ("tasa_EA", "numero_cuotas", "cuotas_restantes") else "" for key in finance.SCHEMAS[kind]}
     result["fecha_inicio" if kind == "deudas" else "fecha"] = f"{int(year):04d}-{int(month):02d}-01"
-    if kind == "gastos_diarios":
+    if kind in ("gastos_diarios", "movimientos"):
         current = finance.today()
         if (int(year), int(month)) == (current.year, current.month):
             result["fecha"] = current.isoformat()
@@ -191,6 +203,9 @@ def editor(selected_ids, kind, new, data, year, month):
     selected = selected_ids[0] if selected_ids and dash.ctx.triggered_id == "per-records" else None
     record = next((r for r in data[kind] if r["id"] == selected), None)
     row = record or defaults(kind, year or finance.today().year, month or finance.today().month)
+    row = dict(row)
+    if kind == "deudas" and record:
+        row["saldo_actual"] = finance.debt_balances(data, finance.today().isoformat()).get(record["id"], 0)
     fields = []
     for key in finance.SCHEMAS[kind]:
         if key == "id":
@@ -209,7 +224,7 @@ def editor(selected_ids, kind, new, data, year, month):
         elif key == "tipo_movimiento":
             options = finance.MOVEMENTS
         elif key == "deuda":
-            options = [{"label": f"{d['nombre']} · {d['entidad']} · {finance.cop(d['saldo_actual'])}", "value": d["id"]} for d in data["deudas"]]
+            options = [{"label": finance.debt_label(data, d["id"]), "value": d["id"]} for d in data["deudas"]]
         props = {"id": {"type": "per-field", "name": key}, "value": row.get(key)}
         if options is not None:
             field = dcc.Dropdown(**props, options=options, clearable=False)
@@ -265,7 +280,7 @@ def graph(title, fig):
                Input("per-data", "data"), Input("per-kind", "value"))
 @personal_auth.require_access
 def render_debt_plan(data, kind):
-    if kind not in ("deudas", "movimientos", "plan_deuda"):
+    if kind not in ("deudas", "plan_deuda"):
         return None, {"display": "none"}
     data = data or finance.empty()
     report = finance.debt_plan(data)
@@ -305,6 +320,31 @@ def render_debt_plan(data, kind):
                                "No estima intereses ni cuotas normales futuras. El saldo proyectado se limita a cero; las alertas indican abonos excesivos. "
                                "El saldo real se calcula con todos los movimientos registrados al cierre de cada mes o a hoy para el mes actual.", className="section-caption"))
     return children, {} if kind == "plan_deuda" else {"display": "none"}
+
+
+@dash.callback(Output("per-kind", "value"), Input("per-open-payments", "n_clicks"), prevent_initial_call=True)
+def open_payments(_):
+    return "movimientos"
+
+
+@dash.callback(Output("per-payment-help", "children"), Output("per-open-payments", "style"),
+               Input("per-kind", "value"), Input("per-data", "data"))
+@personal_auth.require_access
+def payment_help(kind, data):
+    if kind not in ("movimientos", "deudas", "plan_deuda"):
+        return None, {"display": "none"}
+    rows = finance.payment_history(data or finance.empty())
+    future = [r for r in rows if r["fecha_estado"] == "Fecha futura"]
+    children = []
+    if kind == "movimientos":
+        children.append(dbc.Alert("Aquí aparecen todos los pagos y abonos, de todos los meses. Selecciona el círculo de una fila para editarla o usa Eliminar seleccionado. El saldo y el plan se recalculan al guardar o eliminar.", color="info"))
+    if future:
+        children.append(dbc.Alert("Hay movimientos con fecha futura: están guardados, pero no cuentan como pagos realizados a hoy. Si ya pagaste, corrige su fecha. Si era una prueba, puedes eliminarla en Pagos y abonos.", color="warning"))
+        children.append(table(future, ["fecha", "tipo_movimiento", "deuda", "valor", "capital", "fecha_estado"]))
+    if kind != "movimientos" and rows:
+        children.append(html.Details(children=[html.Summary(f"Historial de pagos y abonos · {len(rows)} registros"),
+            table(rows, ["fecha", "tipo_movimiento", "deuda", "valor", "capital", "fecha_estado"])]))
+    return children, {} if kind != "movimientos" else {"display": "none"}
 
 
 @dash.callback(Output("per-dashboard", "children"), Output("per-history", "children"),

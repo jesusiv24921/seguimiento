@@ -69,6 +69,12 @@ el archivo. No se altera el archivo original si la validación falla.
 
 ### Plan de salida de deuda
 
+Pagos y abonos muestra todos los meses, con el nombre de la deuda y un indicador
+para fechas futuras. La selección de fila permite editar o eliminar el movimiento
+original. Deudas y el plan incluyen un acceso directo y un historial de movimientos.
+El saldo actual visible en Deudas se calcula a hoy, igual que la tarjeta del plan;
+otra columna muestra el saldo incluyendo movimientos con fechas futuras.
+
 Visible en Deudas, Pagos y abonos y Plan de salida de deuda. El plan se edita en
 esta última pestaña: un registro por mes, con valores libres y persistidos.
 La importación CSV agrega meses nuevos de forma atómica, rechaza duplicados y
