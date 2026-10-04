@@ -28,6 +28,7 @@ sobrescriban las finanzas. Todas las filas tienen un `id` estable.
 | categorias | id, nombre, tipo (Ingreso/Gasto), estado (Activa/Inactiva), padre opcional |
 | ingresos | fecha, descripción, categoría por id, importes planeado/real, estado y observaciones |
 | gastos | mismos campos, más tipo Fijo/Variable/Deuda |
+| gastos_diarios | id, fecha, descripción, categoría por id, valor pagado y observaciones |
 | deudas | entidad, saldo inicial y actual, tasa E.A., cuotas, fecha de apertura del registro, pago programado y estado |
 | movimientos | deuda por id, fecha, tipo, importe, capital y observaciones |
 | proyecciones | mes, disponible proyectado, abono extraordinario y observaciones |
@@ -65,6 +66,19 @@ el archivo. No se altera el archivo original si la validación falla.
 
 ## Reglas de cálculo
 
+En **Registros → Gastos diarios**, registrar cada pago con fecha, descripción,
+categoría y valor (por ejemplo Taxi, 20000). La fecha predeterminada es hoy para
+el mes actual; para otros meses empieza en el día 1. Cada pago puede editarse o
+eliminarse seleccionando su fila. El resumen agrupa los pagos por fecha y categoría.
+Dos pagos iguales son válidos y se conservan como movimientos separados.
+
+El real de gastos suma los pagos diarios y los valores reales manuales anteriores.
+El planeado proviene de **Presupuesto y gastos previos**. No copiar el presupuesto
+al campo real ni volver a incluir allí pagos ya registrados en el diario. Si un
+real manual representa solo un presupuesto, corregirlo a cero antes de registrar
+los pagos diarios correspondientes. No se alteran automáticamente valores previos.
+Los libros existentes se leen sin modificar; la hoja nueva se crea al guardar.
+
 - Valores monetarios en pesos enteros no negativos; nulos monetarios se interpretan como cero.
 - Balance = ingresos − gastos. Diferencia de ingresos y balance = real − planeado;
   diferencia de gastos = planeado − real.
@@ -89,10 +103,9 @@ Los ejemplos no se cargan automáticamente ni se guardan como constantes.
 
 ## Render
 
-No se ha desplegado, hecho commit ni push. No se requiere base de datos nueva ni
-cambiar el comando del `Procfile`. Verificar que `SEGUIMIENTO_EXCEL_PATH` apunte al
-disco persistente ya previsto por el proyecto; `personal.xlsx` se guarda a su lado.
-Respaldar ambos libros. La configuración real del servicio no se ha consultado.
+No se requiere base de datos nueva ni cambiar el comando del `Procfile`.
+`SEGUIMIENTO_EXCEL_PATH` apunta al disco persistente; `personal.xlsx` se guarda
+a su lado. Respaldar ambos libros.
 Mantener el login existente configurado mediante las variables de autenticación.
 
 ## Acceso a Personal

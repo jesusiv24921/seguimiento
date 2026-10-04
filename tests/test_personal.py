@@ -38,6 +38,59 @@ class PersonalTests(unittest.TestCase):
         self.assertEqual(p.categories(data, 2026, 10)[0]["categoria"], "Alimentación")
         self.assertEqual(p.period(data, 2026)["gastos_real"], 300)
 
+    def test_daily_expenses_update_totals_without_changing_budget(self):
+        data = self.expense(valor_planeado=100000, valor_real=5000)
+        category = data["gastos"][0]["categoria"]
+        original = data["gastos"]
+        self.save("gastos_diarios", fecha="2026-10-04", descripcion="Taxi", categoria=category, valor=20000)
+        data = self.save("gastos_diarios", fecha="2026-10-04", descripcion="Taxi", categoria=category, valor=20000)
+        self.assertEqual(data["gastos"], original)
+        self.assertEqual(p.period(data, 2026, 10)["gastos_real"], 45000)
+        self.assertEqual(p.period(data, 2026, 10)["gastos_planeado"], 100000)
+        self.assertEqual(p.period(data, 2026, 10)["disponible"], -45000)
+        self.assertEqual(p.categories(data, 2026, 10)[0]["real"], 45000)
+        self.assertEqual(p.daily_totals(data, 2026, 10)[0]["valor"], 40000)
+        row = data["gastos_diarios"][0]
+        data = self.save("gastos_diarios", **dict(row, fecha="2026-11-01", valor=10000))
+        self.assertEqual(p.period(data, 2026, 10)["gastos_real"], 25000)
+        self.assertEqual(p.period(data, 2026, 11)["gastos_real"], 10000)
+        self.assertEqual(p.period(data, 2026)["gastos_real"], 35000)
+        self.assertEqual(p.period(data, 2026, 11)["acumulada"], -35000)
+        data = p.mutate("gastos_diarios", delete_id=row["id"], path=self.path)
+        self.assertEqual(p.period(data, 2026)["gastos_real"], 25000)
+
+    def test_daily_categories_and_invalid_values(self):
+        category = self.category("Taxis")
+        row = dict(fecha="2026-10-04", descripcion="Taxi", categoria=category, valor=20000)
+        data = self.save("gastos_diarios", **row)
+        for value in (0, -1, 1.5):
+            with self.assertRaises(ValueError):
+                self.save("gastos_diarios", **dict(row, valor=value))
+        with self.assertRaises(ValueError):
+            self.save("gastos_diarios", **dict(row, categoria=self.category("Salario", "Ingreso")))
+        with self.assertRaises(ValueError):
+            p.mutate("categorias", delete_id=category, path=self.path)
+        cat = next(c for c in data["categorias"] if c["id"] == category)
+        self.save("categorias", **dict(cat, estado="Inactiva", nombre="Transporte"))
+        with self.assertRaises(ValueError):
+            self.save("gastos_diarios", **row)
+        data = self.save("gastos_diarios", **dict(data["gastos_diarios"][0], valor=25000))
+        self.assertEqual(p.daily_totals(data, 2026, 10)[0]["categoria"], "Transporte")
+
+    def test_existing_workbook_without_daily_sheet_preserves_values(self):
+        before = self.expense()
+        wb = openpyxl.load_workbook(self.path)
+        del wb["gastos_diarios"]
+        wb.save(self.path)
+        wb.close()
+        raw = self.path.read_bytes()
+        data = p.load(self.path)
+        self.assertEqual(data, before)
+        self.assertEqual(self.path.read_bytes(), raw)
+        data = self.save("gastos_diarios", fecha="2026-10-04", descripcion="Taxi",
+                         categoria=before["gastos"][0]["categoria"], valor=20000)
+        self.assertEqual(data["gastos"], before["gastos"])
+
     def test_inactive_category_preserves_existing_but_blocks_new(self):
         data = self.expense()
         category = data["categorias"][0]

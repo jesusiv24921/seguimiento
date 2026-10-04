@@ -15,7 +15,7 @@ from theme import CAT_PALETTE, MESES_ES
 
 dash.register_page(__name__, path="/personal", name="Personal", title="Personal · Finanzas")
 
-LABELS = {"ingresos": "Ingresos", "gastos": "Gastos", "deudas": "Deudas",
+LABELS = {"gastos_diarios": "Gastos diarios", "ingresos": "Ingresos", "gastos": "Presupuesto y gastos previos", "deudas": "Deudas",
           "movimientos": "Pagos y abonos", "proyecciones": "Proyección", "categorias": "Categorías"}
 FIELD_LABELS = {"tasa_EA": "Tasa E.A. (%)", "capital": "Capital incluido en el pago",
                 "saldo_inicial": "Saldo al inicio del registro", "saldo_actual": "Saldo actual (calculado)",
@@ -62,7 +62,9 @@ def layout():
         chart_card([
             html.H2("Registros", className="section-title"),
             html.P("Selecciona una fila para editarla o eliminarla. Usa Nuevo para agregar un registro.", className="section-caption"),
-            dcc.Tabs(id="per-kind", value="gastos", children=[dcc.Tab(label=v, value=k) for k, v in LABELS.items()]),
+            html.P("En Gastos diarios registra cada pago: por ejemplo, Taxi, $20.000 y su fecha. Se suma automáticamente al real de la categoría y del mes. "
+                   "En Presupuesto y gastos previos conserva el planeado; el valor real manual es solo para pagos que no están en el diario. No registres el mismo pago en ambos lugares.", className="section-caption"),
+            dcc.Tabs(id="per-kind", value="gastos_diarios", children=[dcc.Tab(label=v, value=k) for k, v in LABELS.items()]),
             html.Div(table([], finance.SCHEMAS["gastos"], id="per-records", row_selectable="single", selected_rows=[], selected_row_ids=[]), id="per-table", className="mt-3"),
             dbc.Button("Nuevo registro", id="per-new", className="my-3", outline=True),
             html.H3(id="per-form-title", className="section-title"),
@@ -120,11 +122,15 @@ def confirm_delete(clicks, record_id):
 def render_table(data, kind, year, month):
     data = data or finance.empty()
     rows = deepcopy(data[kind])
-    if kind in ("ingresos", "gastos", "movimientos"):
+    if kind in ("ingresos", "gastos", "movimientos", "gastos_diarios"):
         rows = [r for r in rows if r["fecha"][:7] == f"{int(year or 0):04d}-{int(month or 1):02d}"]
     if kind in ("ingresos", "gastos"):
         for r in rows:
             r["diferencia"] = (r["valor_planeado"] - r["valor_real"]) * (1 if kind == "gastos" else -1)
+            r["categoria"] = finance.category_label(data, r["categoria"])
+    if kind == "gastos_diarios":
+        rows.sort(key=lambda r: r["fecha"], reverse=True)
+        for r in rows:
             r["categoria"] = finance.category_label(data, r["categoria"])
     if kind == "categorias":
         for r in rows:
@@ -136,6 +142,10 @@ def render_table(data, kind, year, month):
 def defaults(kind, year, month):
     result = {key: 0 if key in finance.MONEY or key in ("tasa_EA", "numero_cuotas", "cuotas_restantes") else "" for key in finance.SCHEMAS[kind]}
     result["fecha_inicio" if kind == "deudas" else "fecha"] = f"{int(year):04d}-{int(month):02d}-01"
+    if kind == "gastos_diarios":
+        current = finance.today()
+        if (int(year), int(month)) == (current.year, current.month):
+            result["fecha"] = current.isoformat()
     if kind in finance.STATES:
         result["estado"] = finance.STATES[kind][0]
     if kind == "gastos":
@@ -187,6 +197,8 @@ def editor(selected_ids, kind, new, data, year, month):
         hint = None
         if key == "categoria":
             hint = "Selecciona una categoría activa. Para crear o renombrar categorías, abre Categorías."
+        if key == "valor_real" and kind == "gastos":
+            hint = "Solo gastos reales previos que no estén en Gastos diarios. Si esto es únicamente un presupuesto, deja el real en cero."
         if key == "capital":
             hint = "En Cuota normal u Otro, indica el capital amortizado. En Abono o Pago total se usa todo el valor. Interés aumenta la deuda sin salida de caja."
         if key == "cuotas_restantes":
@@ -270,4 +282,8 @@ def dashboard(data, year, month):
             table(projected, ["fecha", "disponible_proyectado", "abono_extraordinario", "liquidez_restante", "saldo_proyectado"]), graph("Liquidez proyectada", fig)]))
     except ValueError as exc:
         history.append(dbc.Alert(str(exc) + " Ajusta la proyección guardada.", color="warning"))
+    daily = finance.daily_totals(data, year, month)
+    top.append(html.Details(open=True, children=[html.Summary("Gastos diarios · resumen por fecha y categoría"),
+        chart_card([html.P("Total registrado en el diario del mes: " + finance.cop(sum(r["valor"] for r in daily))),
+                    table(daily, ["fecha", "categoria", "valor"]) if daily else html.P("Aún no hay gastos diarios este mes. Agrégalos en Registros → Gastos diarios.")])]))
     return top, history

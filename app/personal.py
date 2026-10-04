@@ -20,6 +20,7 @@ import uuid
 import openpyxl
 
 SCHEMAS = {
+    "gastos_diarios": "id fecha descripcion categoria valor observaciones".split(),
     "categorias": "id nombre tipo estado padre".split(),
     "ingresos": "id fecha descripcion categoria valor_planeado valor_real estado observaciones".split(),
     "gastos": "id fecha descripcion categoria valor_planeado valor_real estado tipo observaciones".split(),
@@ -67,7 +68,7 @@ def load(path=None):
         try:
             for key, columns in SCHEMAS.items():
                 if key not in wb.sheetnames:
-                    if key == "categorias":
+                    if key in ("categorias", "gastos_diarios"):
                         continue  # Versión anterior: categorías escritas como texto.
                     raise ValueError(f"Falta la hoja {key} en personal.xlsx.")
                 rows = wb[key].iter_rows(values_only=True)
@@ -124,7 +125,7 @@ def category_active(data, category_id):
 
 
 def category_options(data, kind, current=None):
-    category_type = {"ingresos": "Ingreso", "gastos": "Gasto"}[kind]
+    category_type = {"ingresos": "Ingreso", "gastos": "Gasto", "gastos_diarios": "Gasto"}[kind]
     return [{"label": category_label(data, c["id"]) + (" (inactiva)" if not category_active(data, c["id"]) else ""),
              "value": c["id"]} for c in sorted(data["categorias"], key=lambda c: category_label(data, c["id"]).casefold())
             if c["tipo"] == category_type and (category_active(data, c["id"]) or c["id"] == current)]
@@ -147,7 +148,7 @@ def validate_categories(data):
             if parent not in catalog or catalog[parent]["tipo"] != c["tipo"]:
                 raise ValueError("La categoría principal debe existir y ser del mismo tipo.")
             parent = catalog[parent]["padre"]
-    for kind, category_type in (("ingresos", "Ingreso"), ("gastos", "Gasto")):
+    for kind, category_type in (("ingresos", "Ingreso"), ("gastos", "Gasto"), ("gastos_diarios", "Gasto")):
         for row in data[kind]:
             category = catalog.get(row["categoria"])
             if category is None or category["tipo"] != category_type:
@@ -185,6 +186,7 @@ def normalize(kind, row):
     if kind in STATES and out["estado"] not in STATES[kind]:
         raise ValueError("Selecciona un estado válido.")
     required = {"categorias": ["nombre", "tipo"], "ingresos": ["descripcion", "categoria"], "gastos": ["descripcion", "categoria"],
+                "gastos_diarios": ["descripcion", "categoria"],
                 "deudas": ["nombre", "entidad"], "movimientos": ["deuda"], "proyecciones": []}[kind]
     if any(not out[key] for key in required):
         raise ValueError("Completa los campos obligatorios: " + ", ".join(required))
@@ -217,6 +219,8 @@ def normalize(kind, row):
             raise ValueError("El capital no puede superar el valor pagado.")
     if kind == "proyecciones":
         out["fecha"] = out["fecha"][:7] + "-01"
+    if kind == "gastos_diarios" and out["valor"] <= 0:
+        raise ValueError("El gasto diario debe ser mayor a cero.")
     return out
 
 
@@ -257,14 +261,14 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
             if kind == "deudas" and any(m["deuda"] == delete_id for m in data["movimientos"]):
                 raise ValueError("Elimina primero los movimientos asociados a esta deuda.")
             if kind == "categorias":
-                if any(r["categoria"] == delete_id for k in ("ingresos", "gastos") for r in data[k]):
+                if any(r["categoria"] == delete_id for k in ("ingresos", "gastos", "gastos_diarios") for r in data[k]):
                     raise ValueError("La categoría tiene histórico y no puede eliminarse. Cambia su estado a Inactiva.")
                 if any(c["padre"] == delete_id for c in data["categorias"]):
                     raise ValueError("La categoría tiene subcategorías. Puedes desactivarla para conservar la estructura.")
             data[kind] = [r for r in data[kind] if r["id"] != delete_id]
         else:
             normalized = normalize(kind, row)
-            if kind in ("ingresos", "gastos"):
+            if kind in ("ingresos", "gastos", "gastos_diarios"):
                 previous = next((r for r in current[kind] if r["id"] == normalized["id"]), None)
                 if not category_active(data, normalized["categoria"]) and (not previous or previous["categoria"] != normalized["categoria"]):
                     raise ValueError("Selecciona una categoría activa. Las inactivas solo se conservan en registros ya asociados.")
@@ -272,7 +276,7 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
                 raise ValueError("El registro ya no existe. Recarga los datos.")
             others = [r for r in data[kind] if r["id"] != normalized["id"]]
             comparable = lambda r: {k: v for k, v in r.items() if k not in {"id", "saldo_actual"}}
-            if any(comparable(r) == comparable(normalized) for r in others):
+            if kind != "gastos_diarios" and any(comparable(r) == comparable(normalized) for r in others):
                 raise ValueError("Ya existe un registro idéntico; no se guardó el duplicado.")
             if kind == "proyecciones" and any(r["fecha"] == normalized["fecha"] for r in others):
                 raise ValueError("Ya existe una proyección para ese mes. Edítala.")
@@ -324,12 +328,30 @@ def cop(value):
     return "$ " + f"{value or 0:,.0f}".replace(",", ".")
 
 
+def expense_rows(data):
+    """Combine prior manually recorded actuals with individual daily payments once."""
+    return data["gastos"] + [dict(r, valor_planeado=0, valor_real=r["valor"])
+                             for r in data.get("gastos_diarios", [])]
+
+
+def daily_totals(data, year, month):
+    grouped = {}
+    prefix = f"{year:04d}-{month:02d}"
+    for row in data.get("gastos_diarios", []):
+        if row["fecha"].startswith(prefix):
+            key = row["fecha"], row["categoria"]
+            item = grouped.setdefault(key, dict(fecha=row["fecha"],
+                categoria=category_label(data, row["categoria"]), valor=0))
+            item["valor"] += row["valor"]
+    return sorted(grouped.values(), key=lambda row: (row["fecha"], row["categoria"]), reverse=True)
+
+
 def period(data, year, month=None):
     start = date(year, month or 1, 1).isoformat()
     end_month = month or 12
     end = date(year, end_month, monthrange(year, end_month)[1]).isoformat()
     selected = lambda rows: [r for r in rows if start <= r["fecha"] <= end]
-    income, expenses, movements = (selected(data[k]) for k in ("ingresos", "gastos", "movimientos"))
+    income, expenses, movements = selected(data["ingresos"]), selected(expense_rows(data)), selected(data["movimientos"])
     result = {}
     for label, rows in [("ingresos", income), ("gastos", expenses)]:
         for field in ["planeado", "real"]:
@@ -343,7 +365,7 @@ def period(data, year, month=None):
     result["pagos"] = cash_payments(movements) - result["abonos"]
     result["disponible"] = result["balance_real"] - cash_payments(movements)
     result["acumulada"] = (sum(r["valor_real"] for r in data["ingresos"] if r["fecha"] <= end)
-                            - sum(r["valor_real"] for r in data["gastos"] if r["fecha"] <= end)
+                            - sum(r["valor_real"] for r in expense_rows(data) if r["fecha"] <= end)
                             - cash_payments([m for m in data["movimientos"] if m["fecha"] <= end]))
     previous = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
     result["saldo_inicial"] = sum(debt_balances(data, previous).values())
@@ -356,7 +378,7 @@ def period(data, year, month=None):
 def categories(data, year, month):
     prefix = f"{year:04d}-{month:02d}"
     grouped = {}
-    for r in data["gastos"]:
+    for r in expense_rows(data):
         if r["fecha"].startswith(prefix):
             item = grouped.setdefault(r["categoria"], {"categoria": category_label(data, r["categoria"]), "planeado": 0, "real": 0})
             item["planeado"] += r["valor_planeado"]
