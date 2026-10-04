@@ -95,50 +95,13 @@ disco persistente ya previsto por el proyecto; `personal.xlsx` se guarda a su la
 Respaldar ambos libros. La configuración real del servicio no se ha consultado.
 Mantener el login existente configurado mediante las variables de autenticación.
 
-## Clave privada de Personal
+## Acceso a Personal
 
-Personal requiere una segunda clave, independiente del acceso general. Si falta
-`PERSONAL_PASSWORD_HASH`, la sección permanece bloqueada incluso en local. No se
-ha elegido ni configurado una clave real durante el desarrollo.
-
-Para generar el valor de configuración, ejecutar localmente en una terminal:
-
-```powershell
-python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('Nueva clave privada de Personal: ')))"
-```
-
-La entrada no se muestra en pantalla. Copiar el resultado completo como valor de
-`PERSONAL_PASSWORD_HASH` en las variables de entorno del servicio de Render, sin
-comillas adicionales. La clave puede coincidir con la del programa, aunque Personal
-requiere su propio desbloqueo. No guardar la clave ni el hash en Git o en este documento.
-Para local, configurar esa misma variable en el entorno del proceso antes de arrancar.
-
-Configurar también `SEGUIMIENTO_SECRET_KEY` con un valor aleatorio privado y estable
-si aún no está definido. Se puede generar con
-`python -c "import secrets; print(secrets.token_hex(32))"`.
-Es la clave del servidor para firmar sesiones, no la contraseña de acceso.
-El login general y sus variables se conservan sin cambios.
-
-Abrir Personal y pulsar **Desbloquear Personal**. El acceso dura 30 minutos y
-puede cerrarse desde **Bloquear / gestionar acceso → Bloquear Personal**.
-Otra sesión de navegador continúa bloqueada. Al cambiar el hash configurado,
-las autorizaciones emitidas con el anterior dejan de ser válidas.
-
-La verificación se aplica en el servidor a todos los callbacks de Personal,
-incluyendo lectura, guardado y eliminación. El navegador no recibe los datos
-financieros antes de desbloquear. Cada 30 segundos se comprueba el vencimiento
-para retirar la vista; las operaciones se rechazan inmediatamente al vencer.
-El login y bloqueo llevan token CSRF, hay un límite de cinco intentos cada diez
-minutos por dirección remota, y las respuestas no se almacenan en caché.
-El límite vive en el proceso único existente; se reinicia al reiniciar el servidor.
-Las cookies usan HttpOnly y SameSite=Lax; en Render también Secure (HTTPS).
-
-Esta separación restringe el acceso desde la aplicación. No cifra el archivo
-Excel frente a administradores que tengan acceso al disco o al servicio de Render.
-Conservar la clave personal en privado y bloquear al terminar en equipos compartidos.
-
-Referencias: [seguridad de Flask](https://flask.palletsprojects.com/en/stable/web-security/)
-y [configuración de sesiones](https://flask.palletsprojects.com/en/stable/config/).
+Personal utiliza el login general del programa sin pedir una segunda clave.
+Quien tenga acceso al programa puede entrar a Personal.
+`PERSONAL_PASSWORD_HASH` ya no se utiliza. Los enlaces antiguos de acceso y
+bloqueo redirigen a `/personal`. Se conserva el control de origen de escrituras
+y las respuestas no se almacenan en cache.
 
 ## Archivos del módulo
 

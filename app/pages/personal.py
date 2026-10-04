@@ -47,18 +47,9 @@ def table(rows, columns=None, **kwargs):
 
 
 def layout():
-    if not personal_auth.authorized():
-        return html.Div(className="page personal-page", children=[
-            page_header("Personal", "Acceso privado"),
-            chart_card([html.P("Esta sección requiere tu clave personal."),
-                        html.A("Desbloquear Personal", href="/personal/access", className="btn btn-primary")]),
-        ])
     current = finance.today()
     return html.Div(className="page personal-page", children=[
         page_header("Personal", "Finanzas por mes · Valores en pesos colombianos"),
-        html.A("Bloquear / gestionar acceso", href="/personal/access", className="btn btn-outline-secondary mb-3"),
-        dcc.Location(id="per-session-redirect", refresh=True),
-        dcc.Interval(id="per-session-check", interval=30000, n_intervals=0),
         dcc.Store(id="per-data"), dcc.Store(id="per-edit-id"),
         html.Div(className="personal-period", children=[
             html.Div([html.Label("Año", htmlFor="per-year"), dbc.Input(id="per-year", type="number", min=1900, max=9998, step=1, value=current.year)]),
@@ -90,11 +81,6 @@ def layout():
         ]),
         html.Div(id="per-history", className="mt-3"),
     ])
-
-
-@dash.callback(Output("per-session-redirect", "href"), Input("per-session-check", "n_intervals"))
-def check_session(_):
-    return dash.no_update if personal_auth.authorized() else "/personal/access"
 
 
 @dash.callback(Output("per-data", "data"), Output("per-message", "children"),
