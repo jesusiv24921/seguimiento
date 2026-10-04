@@ -1325,3 +1325,19 @@ body {
     border-radius: 999px;
     transition: width 0.35s ease;
 }
+/* Personal: reuse the shared cards and keep forms usable on mobile. */
+.personal-period { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+.personal-period > div { min-width: 150px; }
+.personal-cards, .personal-form, .personal-charts { display: grid; gap: 1rem; margin: 1rem 0; }
+.personal-cards { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.personal-form { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.personal-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.personal-stat { display: flex; justify-content: space-between; gap: 1rem; margin: .5rem 0; }
+.personal-stat strong { white-space: nowrap; }
+.personal-page summary { font-weight: 600; cursor: pointer; padding: 1rem 0; }
+.personal-page .chart-card { min-width: 0; }
+.content-area:has(.personal-page) > .filters-panel { display: none; }
+.personal-form label { display: block; margin-bottom: .35rem; }
+@media (max-width: 640px) {
+    .personal-charts, .personal-form, .personal-cards { grid-template-columns: minmax(0, 1fr); }
+}

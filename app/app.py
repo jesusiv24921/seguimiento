@@ -22,6 +22,7 @@ from flask import request
 import ai_assistant
 import data as data_mod
 import knowledge as km
+import personal_auth
 from components import badge_conocimiento_estado, badge_estado, badge_prioridad
 from data_store import (df_from_store, df_to_store, hallazgos_to_store, issues_to_store,
                          knowledge_to_store, lookups_to_store)
@@ -60,6 +61,8 @@ if _auth_user and _auth_password:
     server.secret_key = os.environ.get("SEGUIMIENTO_SECRET_KEY", os.urandom(24).hex())
     dash_auth.BasicAuth(app, {_auth_user: _auth_password})
 
+personal_auth.install(server)
+
 
 @server.after_request
 def _no_cache_dash_internals(response):
@@ -74,6 +77,7 @@ def _no_cache_dash_internals(response):
     return response
 
 NAV_ITEMS = [
+    ("/personal", "Personal", "bi-wallet2"),
     ("/", "Resumen ejecutivo", "bi-house"),
     ("/actividades", "Actividades", "bi-list-check"),
     ("/calendario", "Calendario", "bi-calendar3"),
