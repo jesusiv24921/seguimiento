@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from calendar import monthrange
 from copy import deepcopy
+import csv
+import io
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from threading import RLock
@@ -20,6 +23,7 @@ import uuid
 import openpyxl
 
 SCHEMAS = {
+    "plan_deuda": "id fecha disponible_proyectado abono_extraordinario liquidez_minima observaciones".split(),
     "gastos_diarios": "id fecha descripcion categoria valor observaciones".split(),
     "categorias": "id nombre tipo estado padre".split(),
     "ingresos": "id fecha descripcion categoria valor_planeado valor_real estado observaciones".split(),
@@ -36,7 +40,7 @@ STATES = {
 }
 MOVEMENTS = ["Cuota normal", "Abono dirigido a capital", "Pago total", "Interés", "Otro"]
 MONEY = {"valor_planeado", "valor_real", "saldo_inicial", "saldo_actual", "pago_programado",
-         "valor", "capital", "disponible_proyectado", "abono_extraordinario"}
+         "valor", "capital", "disponible_proyectado", "abono_extraordinario", "liquidez_minima"}
 _LOCK = RLock()
 
 
@@ -68,7 +72,7 @@ def load(path=None):
         try:
             for key, columns in SCHEMAS.items():
                 if key not in wb.sheetnames:
-                    if key in ("categorias", "gastos_diarios"):
+                    if key in ("categorias", "gastos_diarios", "plan_deuda"):
                         continue  # Versión anterior: categorías escritas como texto.
                     raise ValueError(f"Falta la hoja {key} en personal.xlsx.")
                 rows = wb[key].iter_rows(values_only=True)
@@ -187,7 +191,7 @@ def normalize(kind, row):
         raise ValueError("Selecciona un estado válido.")
     required = {"categorias": ["nombre", "tipo"], "ingresos": ["descripcion", "categoria"], "gastos": ["descripcion", "categoria"],
                 "gastos_diarios": ["descripcion", "categoria"],
-                "deudas": ["nombre", "entidad"], "movimientos": ["deuda"], "proyecciones": []}[kind]
+                "deudas": ["nombre", "entidad"], "movimientos": ["deuda"], "proyecciones": [], "plan_deuda": []}[kind]
     if any(not out[key] for key in required):
         raise ValueError("Completa los campos obligatorios: " + ", ".join(required))
     if kind == "categorias":
@@ -217,7 +221,7 @@ def normalize(kind, row):
             out["capital"] = 0
         if out["capital"] > out["valor"]:
             raise ValueError("El capital no puede superar el valor pagado.")
-    if kind == "proyecciones":
+    if kind in ("proyecciones", "plan_deuda"):
         out["fecha"] = out["fecha"][:7] + "-01"
     if kind == "gastos_diarios" and out["valor"] <= 0:
         raise ValueError("El gasto diario debe ser mayor a cero.")
@@ -247,7 +251,7 @@ def debt_balances(data, cutoff="9999-12-31"):
     return balances
 
 
-def mutate(kind, row=None, delete_id=None, expected=None, path=None):
+def mutate(kind, row=None, delete_id=None, expected=None, path=None, batch=None):
     """Transacción dentro del único worker de Render, con revisión optimista."""
     path = Path(path) if path else storage_path()
     with _LOCK:
@@ -255,7 +259,21 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
         if expected is not None and expected != revision(current):
             raise ValueError("Los datos cambiaron en otra pestaña. Recarga antes de guardar.")
         data = deepcopy(current)
-        if delete_id:
+        if kind == "plan_deuda":
+            previous = next((r for r in data[kind] if r["id"] == (delete_id or (row or {}).get("id"))), None)
+            this_month = today().isoformat()[:7]
+            if previous and previous["fecha"][:7] < this_month:
+                raise ValueError("Los meses cerrados del plan se conservan y no se pueden modificar.")
+            if delete_id and previous and previous["fecha"][:7] <= this_month:
+                raise ValueError("Solo puedes eliminar meses futuros del plan.")
+        if batch is not None:
+            if kind != "plan_deuda" or not batch or len(batch) > 240:
+                raise ValueError("Importa entre 1 y 240 meses del plan.")
+            for item in batch:
+                if item.get("id"):
+                    raise ValueError("La importación solo agrega meses nuevos.")
+                data[kind].append(normalize(kind, item))
+        elif delete_id:
             if not any(r["id"] == delete_id for r in data[kind]):
                 raise ValueError("El registro ya no existe.")
             if kind == "deudas" and any(m["deuda"] == delete_id for m in data["movimientos"]):
@@ -281,6 +299,13 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
             if kind == "proyecciones" and any(r["fecha"] == normalized["fecha"] for r in others):
                 raise ValueError("Ya existe una proyección para ese mes. Edítala.")
             data[kind] = [normalized if r["id"] == normalized["id"] else r for r in data[kind]] if row.get("id") else others + [normalized]
+        if kind == "plan_deuda":
+            months = [r["fecha"] for r in data[kind]]
+            if len(months) != len(set(months)):
+                raise ValueError("Ya existe un plan para ese mes. Edita el registro existente.")
+            changed = batch if batch is not None else ([row] if row and not delete_id else [])
+            if any(valid_date(r["fecha"])[:7] < today().isoformat()[:7] for r in changed):
+                raise ValueError("Agrega o edita únicamente el mes actual o meses futuros.")
         validate_categories(data)
         balances = debt_balances(data)
         for d in data["deudas"]:
@@ -289,6 +314,8 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
                 raise ValueError("Una deuda con saldo pendiente no puede marcarse como pagada.")
         if kind == "proyecciones" and not delete_id:
             project(data)
+        if batch is not None and path.exists():
+            shutil.copy2(path, path.with_name(f".{path.stem}-plan-backup-{uuid.uuid4().hex}.xlsx"))
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f".{path.stem}-{uuid.uuid4().hex}.xlsx")
         wb = openpyxl.Workbook()
@@ -322,6 +349,20 @@ def mutate(kind, row=None, delete_id=None, expected=None, path=None):
                 except PermissionError:
                     pass  # No ocultar el error original de escritura.
         return load(path)
+
+
+def parse_debt_plan(text):
+    """Import user-supplied values, never packaged financial seed data."""
+    if not text or len(text) > 100000:
+        raise ValueError("Pega el CSV del plan (máximo 100 KB).")
+    reader = csv.DictReader(io.StringIO(text.strip().lstrip("\ufeff")))
+    fields = SCHEMAS["plan_deuda"][1:]
+    if reader.fieldnames != fields:
+        raise ValueError("Encabezados esperados: " + ",".join(fields))
+    rows = list(reader)
+    if any(None in row or any(value is None for value in row.values()) for row in rows):
+        raise ValueError("Cada fila debe tener todas las columnas del encabezado.")
+    return rows
 
 
 def cop(value):
@@ -401,3 +442,80 @@ def project(data, cutoff=None):
         balance -= r["abono_extraordinario"]
         rows.append(dict(r, liquidez_restante=r["disponible_proyectado"] - r["abono_extraordinario"], saldo_proyectado=balance))
     return rows
+
+
+def debt_plan(data, as_of=None):
+    """Compare the persisted plan with payments and cash flows, without writing."""
+    as_of = valid_date(as_of or today().isoformat())
+    plans = sorted(data.get("plan_deuda", []), key=lambda r: r["fecha"])
+    actual = deepcopy(data)
+    for kind in ("ingresos", "gastos", "gastos_diarios", "movimientos"):
+        actual[kind] = [r for r in data.get(kind, []) if r["fecha"] <= as_of]
+    initial = sum(d["saldo_inicial"] for d in data["deudas"] if d["fecha_inicio"] <= as_of)
+    current_balance = sum(debt_balances(actual, as_of).values())
+    rows, alerts = [], []
+    previous = ((date.fromisoformat(plans[0]["fecha"]) - timedelta(days=1)).isoformat() if plans else as_of)
+    projected = sum(debt_balances(data, previous).values())
+    for plan in plans:
+        year, month = map(int, plan["fecha"][:7].split("-"))
+        end = date(year, month, monthrange(year, month)[1]).isoformat()
+        projected += sum(d["saldo_inicial"] for d in data["deudas"] if previous < d["fecha_inicio"] <= end)
+        before_extra = projected
+        projected = max(0, projected - plan["abono_extraordinario"])
+        previous = end
+        future = plan["fecha"][:7] > as_of[:7]
+        s = period(actual, year, month)
+        real_extra = None if future else s["abonos"]
+        real_available = None if future else s["balance_real"] - s["pagos"]
+        real_remaining = None if future else real_available - real_extra
+        real_balance = None if future else sum(debt_balances(actual, min(end, as_of)).values())
+        planned = plan["abono_extraordinario"]
+        remaining = plan["disponible_proyectado"] - planned
+        paid_off = real_balance == 0 and any(d["fecha_inicio"] <= min(end, as_of) for d in data["deudas"])
+        if paid_off:
+            status = "Deuda liquidada"
+        elif planned == 0:
+            status = "Sin abono programado"
+        elif future:
+            status = "PENDIENTE"
+        elif real_extra >= planned:
+            status = "CUMPLIDO"
+        elif real_extra > 0:
+            status = "PARCIAL"
+        elif end < as_of:
+            status = "NO CUMPLIDO"
+        else:
+            status = "PENDIENTE"
+        row = dict(plan, mes=plan["fecha"][:7], abono_real=real_extra,
+                   liquidez_planeada=remaining, disponible_real=real_available,
+                   liquidez_real=real_remaining,
+                   diferencia_liquidez=None if future else real_remaining - remaining,
+                   cumplimiento_pct=None if not planned or future else round(real_extra / planned * 100, 1),
+                   cumplimiento=status, saldo_proyectado=projected, saldo_real=real_balance)
+        rows.append(row)
+        month_label = row["mes"]
+        if planned > before_extra:
+            alerts.append(f"{month_label}: el abono planeado supera el saldo proyectado disponible; ajusta el último abono.")
+        if remaining < plan["liquidez_minima"]:
+            alerts.append(f"{month_label}: la liquidez planeada no alcanza el mínimo que quieres conservar.")
+        if not future:
+            if planned > real_extra and not paid_off:
+                alerts.append(f"{month_label}: el abono real está por debajo del planeado.")
+                if as_of[:7] == month_label and (date.fromisoformat(end) - date.fromisoformat(as_of)).days <= 6:
+                    alerts.append(f"{month_label}: el mes está por terminar y aún falta completar el abono.")
+            if real_remaining < plan["liquidez_minima"]:
+                alerts.append(f"{month_label}: la liquidez real está por debajo del mínimo planeado.")
+            if real_balance > projected:
+                alerts.append(f"{month_label}: el saldo real está por encima del proyectado.")
+    keys = ("disponible_proyectado", "abono_extraordinario", "liquidez_planeada",
+            "disponible_real", "abono_real", "liquidez_real")
+    totals = {key: sum(r[key] or 0 for r in rows) for key in keys}
+    comparisons = [("Liquidez disponible", "disponible_proyectado", "disponible_real"),
+                   ("Abonos extraordinarios", "abono_extraordinario", "abono_real"),
+                   ("Liquidez conservada", "liquidez_planeada", "liquidez_real")]
+    summary = [dict(concepto=label, planeado=totals[planned], real=totals[real],
+                    diferencia=totals[real] - totals[planned]) for label, planned, real in comparisons]
+    return dict(rows=rows, alerts=alerts, totals=totals, summary=summary,
+                deuda_inicial=initial, saldo_actual=current_balance,
+                abonos_realizados=sum(m["valor"] for m in actual["movimientos"] if m["tipo_movimiento"] == "Abono dirigido a capital"),
+                progreso=round((initial - current_balance) / initial * 100, 1) if initial else None)

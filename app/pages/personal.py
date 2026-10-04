@@ -16,12 +16,17 @@ from theme import CAT_PALETTE, MESES_ES
 dash.register_page(__name__, path="/personal", name="Personal", title="Personal · Finanzas")
 
 LABELS = {"gastos_diarios": "Gastos diarios", "ingresos": "Ingresos", "gastos": "Presupuesto y gastos previos", "deudas": "Deudas",
-          "movimientos": "Pagos y abonos", "proyecciones": "Proyección", "categorias": "Categorías"}
+          "plan_deuda": "Plan de salida de deuda", "movimientos": "Pagos y abonos", "proyecciones": "Proyección", "categorias": "Categorías"}
 FIELD_LABELS = {"tasa_EA": "Tasa E.A. (%)", "capital": "Capital incluido en el pago",
                 "saldo_inicial": "Saldo al inicio del registro", "saldo_actual": "Saldo actual (calculado)",
                 "fecha_inicio": "Fecha del saldo inicial", "deuda": "Deuda",
                 "ejecucion": "% ejecución", "fecha": "Fecha", "padre": "Categoría principal (opcional)",
-                "categoria": "Categoría", "descripcion": "Descripción"}
+                "categoria": "Categoría", "descripcion": "Descripción",
+                "disponible_proyectado": "Liquidez disponible planeada", "abono_extraordinario": "Abono extra planeado",
+                "liquidez_minima": "Liquidez mínima a conservar", "abono_real": "Abono extra real",
+                "disponible_real": "Liquidez disponible real", "liquidez_planeada": "Liquidez a conservar planeada",
+                "liquidez_real": "Liquidez real conservada", "diferencia_liquidez": "Diferencia de liquidez",
+                "cumplimiento_pct": "Cumplimiento (%)", "saldo_proyectado": "Saldo deuda proyectado", "saldo_real": "Saldo deuda real"}
 COP = Format(precision=0, scheme=Scheme.fixed, group=Group.yes,
              groups=3, group_delimiter=".", decimal_delimiter=",",
              symbol=Symbol.yes, symbol_prefix="$ ")
@@ -33,7 +38,8 @@ def label(key):
 
 def table(rows, columns=None, **kwargs):
     columns = columns or (list(rows[0]) if rows else [])
-    money = finance.MONEY | {"planeado", "real", "diferencia", "liquidez_restante", "saldo_proyectado"}
+    money = finance.MONEY | {"planeado", "real", "diferencia", "liquidez_restante", "saldo_proyectado",
+                             "abono_real", "disponible_real", "liquidez_planeada", "liquidez_real", "diferencia_liquidez", "saldo_real"}
     return dash_table.DataTable(
         data=rows, columns=[dict(name=label(c), id=c, **({"type": "numeric", "format": COP} if c in money else {})) for c in columns if c != "id"],
         sort_action="native", page_size=12, style_table={"overflowX": "auto"},
@@ -42,7 +48,11 @@ def table(rows, columns=None, **kwargs):
         style_header={"fontWeight": "600", "backgroundColor": "#f8f7f4"},
         style_data_conditional=[
             {"if": {"filter_query": "{diferencia} < 0", "column_id": "diferencia"}, "color": "#a52323"},
-            {"if": {"filter_query": "{diferencia} > 0", "column_id": "diferencia"}, "color": "#0a6b0a"}],
+            {"if": {"filter_query": "{diferencia} > 0", "column_id": "diferencia"}, "color": "#0a6b0a"}] + [
+            {"if": {"filter_query": '{cumplimiento} = "' + state + '"', "column_id": "cumplimiento"},
+             "backgroundColor": color, "fontWeight": "600"}
+            for state, color in [("CUMPLIDO", "#dcf3df"), ("Deuda liquidada", "#dcf3df"),
+                                 ("PARCIAL", "#fff0c7"), ("PENDIENTE", "#eef1f5"), ("NO CUMPLIDO", "#ffe0df")]],
         **kwargs)
 
 
@@ -65,6 +75,13 @@ def layout():
             html.P("En Gastos diarios registra cada pago: por ejemplo, Taxi, $20.000 y su fecha. Se suma automáticamente al real de la categoría y del mes. "
                    "En Presupuesto y gastos previos conserva el planeado; el valor real manual es solo para pagos que no están en el diario. No registres el mismo pago en ambos lugares.", className="section-caption"),
             dcc.Tabs(id="per-kind", value="gastos_diarios", children=[dcc.Tab(label=v, value=k) for k, v in LABELS.items()]),
+            html.Div(id="per-debt-plan", className="my-3"),
+            html.Div(id="per-plan-import", style={"display": "none"}, children=[
+                html.Details(children=[html.Summary("Importar meses nuevos del plan"),
+                    html.P("Pega un CSV con los encabezados indicados y valores en pesos enteros sin separadores. Solo agrega meses; no reemplaza registros existentes."),
+                    html.Code(",".join(finance.SCHEMAS["plan_deuda"][1:])),
+                    dbc.Textarea(id="per-plan-csv", rows=6, className="my-2", placeholder="Pega aquí el CSV del plan"),
+                    dbc.Button("Importar plan", id="per-plan-import-button", color="secondary")])]),
             html.Div(table([], finance.SCHEMAS["gastos"], id="per-records", row_selectable="single", selected_rows=[], selected_row_ids=[]), id="per-table", className="mt-3"),
             dbc.Button("Nuevo registro", id="per-new", className="my-3", outline=True),
             html.H3(id="per-form-title", className="section-title"),
@@ -87,15 +104,21 @@ def layout():
 
 @dash.callback(Output("per-data", "data"), Output("per-message", "children"),
     Input("url", "pathname"), Input("per-refresh", "n_clicks"), Input("per-save", "n_clicks"), Input("per-confirm", "submit_n_clicks"),
+    Input("per-plan-import-button", "n_clicks"), State("per-plan-csv", "value"),
     State("per-kind", "value"), State("per-edit-id", "data"), State("per-data", "data"),
     State({"type": "per-field", "name": ALL}, "value"), State({"type": "per-field", "name": ALL}, "id"),
-    running=[(Output("per-save", "disabled"), True, False)])
+    running=[(Output("per-save", "disabled"), True, False), (Output("per-plan-import-button", "disabled"), True, False)])
 @personal_auth.require_access
-def load_or_save(pathname, refresh, save, delete, kind, record_id, data, values, ids):
+def load_or_save(pathname, refresh, save, delete, import_clicks, plan_csv, kind, record_id, data, values, ids):
     if pathname != "/personal":
         return dash.no_update, dash.no_update
     try:
         trigger = dash.ctx.triggered_id
+        if trigger == "per-plan-import-button":
+            if data is None:
+                raise ValueError("Recarga los datos antes de importar.")
+            updated = finance.mutate("plan_deuda", batch=finance.parse_debt_plan(plan_csv), expected=finance.revision(data))
+            return updated, dbc.Alert("Plan importado. Los registros anteriores se conservaron.", color="success")
         if trigger in ("per-save", "per-confirm"):
             if data is None:
                 raise ValueError("Recarga los datos antes de guardar.")
@@ -122,6 +145,8 @@ def confirm_delete(clicks, record_id):
 def render_table(data, kind, year, month):
     data = data or finance.empty()
     rows = deepcopy(data[kind])
+    if kind == "plan_deuda":
+        rows.sort(key=lambda r: r["fecha"])
     if kind in ("ingresos", "gastos", "movimientos", "gastos_diarios"):
         rows = [r for r in rows if r["fecha"][:7] == f"{int(year or 0):04d}-{int(month or 1):02d}"]
     if kind in ("ingresos", "gastos"):
@@ -199,6 +224,10 @@ def editor(selected_ids, kind, new, data, year, month):
             hint = "Selecciona una categoría activa. Para crear o renombrar categorías, abre Categorías."
         if key == "valor_real" and kind == "gastos":
             hint = "Solo gastos reales previos que no estén en Gastos diarios. Si esto es únicamente un presupuesto, deja el real en cero."
+        if kind == "plan_deuda" and key == "fecha":
+            hint = "Un registro por mes. Los meses cerrados se conservan; solo se eliminan meses futuros."
+        if kind == "plan_deuda" and key == "disponible_proyectado":
+            hint = "Liquidez después de tus gastos y cuotas normales, antes del abono extraordinario."
         if key == "capital":
             hint = "En Cuota normal u Otro, indica el capital amortizado. En Abono o Pago total se usa todo el valor. Interés aumenta la deuda sin salida de caja."
         if key == "cuotas_restantes":
@@ -211,7 +240,7 @@ def editor(selected_ids, kind, new, data, year, month):
                State({"type": "per-field", "name": ALL}, "id"), State("per-kind", "value"))
 @personal_auth.require_access
 def preview(values, ids, kind):
-    if kind != "proyecciones":
+    if kind not in ("proyecciones", "plan_deuda"):
         return None
     row = {i["name"]: v for i, v in zip(ids, values)}
     try:
@@ -230,6 +259,52 @@ def graph(title, fig):
     fig.update_layout(colorway=CAT_PALETTE, separators=",.")
     fig.update_yaxes(tickprefix="$ ", tickformat=",.0f")
     return chart_card([html.H3(title, className="section-title"), dcc.Graph(figure=fig, style={"height": "340px"}, config={"displayModeBar": False, "responsive": True})])
+
+
+@dash.callback(Output("per-debt-plan", "children"), Output("per-plan-import", "style"),
+               Input("per-data", "data"), Input("per-kind", "value"))
+@personal_auth.require_access
+def render_debt_plan(data, kind):
+    if kind not in ("deudas", "movimientos", "plan_deuda"):
+        return None, {"display": "none"}
+    data = data or finance.empty()
+    report = finance.debt_plan(data)
+    rows, totals = report["rows"], report["totals"]
+    progress = report["progreso"]
+    cards = [card("Deuda inicial", [("Registrada", report["deuda_inicial"])]),
+             card("Saldo actual", [("A hoy", report["saldo_actual"])]),
+             card("Abonos extra planeados", [("Todo el plan", totals["abono_extraordinario"])]),
+             card("Abonos extra realizados", [("Movimientos hasta hoy", report["abonos_realizados"])]),
+             card("Liquidez conservada", [("Meses del plan hasta hoy", totals["liquidez_real"])]),
+             chart_card([html.H3("Progreso de pago", className="section-title"),
+                         html.Strong("Sin deuda registrada" if progress is None else f"{progress}%"),
+                         dbc.Progress(value=max(0, min(100, progress or 0)), className="mt-2")])]
+    children = [html.H2("Plan de salida de deuda", className="section-title"),
+                html.Div(cards, className="personal-cards"),
+                html.P("Edita los meses en la pestaña Plan de salida de deuda. Registra los pagos una sola vez en Pagos y abonos: "
+                       "los movimientos de tipo Abono dirigido a capital actualizan automáticamente este plan. "
+                       "La liquidez real usa ingresos menos gastos y cuotas normales, y luego descuenta el abono extra.", className="section-caption")]
+    if not rows:
+        children.append(dbc.Alert("Agrega meses desde Plan de salida de deuda o importa tu plan. Tus deudas y movimientos existentes se conservan.", color="info"))
+    else:
+        if report["alerts"]:
+            children.append(dbc.Alert([html.Strong("Revisa tu plan"), html.Ul([html.Li(a) for a in report["alerts"]])], color="warning"))
+        children.append(table(rows, ["mes", "disponible_proyectado", "abono_extraordinario", "abono_real",
+            "liquidez_planeada", "liquidez_minima", "disponible_real", "liquidez_real", "diferencia_liquidez",
+            "cumplimiento", "cumplimiento_pct", "saldo_proyectado", "saldo_real", "observaciones"]))
+        children += [html.H3(f"Total del plan · {rows[0]['mes']} a {rows[-1]['mes']}", className="section-title mt-3"),
+                     table(report["summary"], ["concepto", "planeado", "real", "diferencia"]),
+                     html.P("Los totales planeados abarcan todo el plan; los reales incluyen solo lo registrado hasta hoy en sus meses. "
+                            "Los reales de meses futuros se muestran vacíos. Las diferencias del total comparan avance a hoy frente al plan completo.", className="section-caption")]
+        figure = go.Figure([go.Scatter(name=name, x=[r["mes"] for r in rows], y=[r[key] for r in rows], mode="lines+markers", connectgaps=False)
+            for name, key in [("Saldo deuda proyectado", "saldo_proyectado"), ("Saldo deuda real", "saldo_real")]])
+        payments = go.Figure([go.Bar(name=name, x=[r["mes"] for r in rows], y=[r[key] for r in rows])
+            for name, key in [("Abono planeado", "abono_extraordinario"), ("Abono real", "abono_real")]])
+        children.append(html.Div([graph("Saldo de deuda · planeado vs real", figure), graph("Abonos extraordinarios", payments)], className="personal-charts"))
+        children.append(html.P("Proyección orientativa: saldo al inicio del plan más deudas registradas después, menos abonos extra planeados. "
+                               "No estima intereses ni cuotas normales futuras. El saldo proyectado se limita a cero; las alertas indican abonos excesivos. "
+                               "El saldo real se calcula con todos los movimientos registrados al cierre de cada mes o a hoy para el mes actual.", className="section-caption"))
+    return children, {} if kind == "plan_deuda" else {"display": "none"}
 
 
 @dash.callback(Output("per-dashboard", "children"), Output("per-history", "children"),

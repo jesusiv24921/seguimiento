@@ -29,6 +29,7 @@ sobrescriban las finanzas. Todas las filas tienen un `id` estable.
 | ingresos | fecha, descripción, categoría por id, importes planeado/real, estado y observaciones |
 | gastos | mismos campos, más tipo Fijo/Variable/Deuda |
 | gastos_diarios | id, fecha, descripción, categoría por id, valor pagado y observaciones |
+| plan_deuda | id, mes, liquidez disponible planeada, abono extraordinario planeado, liquidez mínima y observaciones |
 | deudas | entidad, saldo inicial y actual, tasa E.A., cuotas, fecha de apertura del registro, pago programado y estado |
 | movimientos | deuda por id, fecha, tipo, importe, capital y observaciones |
 | proyecciones | mes, disponible proyectado, abono extraordinario y observaciones |
@@ -65,6 +66,34 @@ siguiente guardado persiste la migración junto con el cambio. Leer nunca escrib
 el archivo. No se altera el archivo original si la validación falla.
 
 ## Reglas de cálculo
+
+### Plan de salida de deuda
+
+Visible en Deudas, Pagos y abonos y Plan de salida de deuda. El plan se edita en
+esta última pestaña: un registro por mes, con valores libres y persistidos.
+La importación CSV agrega meses nuevos de forma atómica, rechaza duplicados y
+crea una copia del libro previo en el disco persistente (`.personal-plan-backup-*.xlsx`).
+Los importes iniciales se cargan como datos del usuario, no como constantes del código.
+Los meses cerrados no se editan ni eliminan desde el plan; solo se eliminan meses futuros.
+
+Los reales se calculan desde ingresos, gastos (incluidos diarios) y movimientos.
+Disponible real = ingresos reales − gastos reales − pagos de deuda no extraordinarios.
+Conservada real = disponible real − movimientos de tipo Abono dirigido a capital.
+Pago total es un pago no extraordinario según el catálogo actual; siempre reduce
+la liquidez y el saldo, y al liquidar toda la deuda prevalece el estado Deuda liquidada.
+No se ingresan pagos adicionales en el plan. Cambiarlo no escribe en los movimientos.
+Los reales futuros se muestran vacíos; el mes actual incluye solo registros hasta hoy.
+
+La proyección parte del saldo anterior al primer mes del plan, suma deudas nuevas
+registradas y descuenta los abonos planeados. No estima intereses ni cuotas ordinarias
+futuras. Se limita a cero y alerta si un abono planeado supera el saldo proyectado.
+El mínimo de liquidez es editable e independiente del restante calculado.
+Las alertas de fin de mes comienzan cuando faltan seis días o menos para el cierre.
+Los totales del plan suman todos sus meses; los reales son el avance registrado hasta hoy.
+El porcentaje de progreso compara el saldo actual con la suma de saldos iniciales
+de las deudas iniciadas hasta hoy; puede ser negativo si los intereses aumentan el saldo.
+
+### Gastos y liquidez
 
 En **Registros → Gastos diarios**, registrar cada pago con fecha, descripción,
 categoría y valor (por ejemplo Taxi, 20000). La fecha predeterminada es hoy para
